@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         모닥 온라인 보스 오토봇 (단독 실행 버전)
 // @namespace    http://tampermonkey.net/
-// @version      3.8
+// @version      3.10
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -229,9 +229,13 @@
     let currentBossIndex = -1;
     let pendingBossData = null;
     let isHandlingDeath = false;
+    let isReturning = false;
 
     // 기본 사냥터 복귀 공통 함수
     async function returnToDefaultHuntingGround() {
+        if (isReturning) return;
+        isReturning = true;
+
         console.log("\n--- [99] 기본 사냥터 복귀 시작 ---");
         await returnTownAndClickCampfire(false);
         await sleep(1000);
@@ -260,6 +264,7 @@
         console.log("  -> [사냥 시작] 'z' 키 입력 (기본 사냥터 자동전투 ON)");
         simulateKey('z');
         console.log("--- [99] 기본 사냥터 복귀 완료 ---");
+        isReturning = false;
     }
 
     // 마을 귀환 및 부활 후속 이동 (구석 이동 후 캠프파이어 상호작용)
@@ -346,8 +351,9 @@
 
     // 보스 수행 메인 함수
     async function executeBossTask(bossIndex, bossName) {
-        if (isRunning) {
-            console.log(`[보스 예약됨] 현재 다른 보스 진행 중이므로 [${bossIndex}] ${bossName}을(를) 예약합니다.`);
+        // 👉 복귀/부활 후속조치 중(isReturning)이거나 다른 보스 진행 중이면 예약으로 등록
+        if (isRunning || isReturning) {
+            console.log(`[보스 예약됨] 현재 복귀/부활 후속 조치 중이거나 다른 보스 진행 중이므로 [${bossIndex}] ${bossName}을(를) 예약합니다.`);
             pendingBossData = { index: bossIndex, name: bossName };
             return;
         }
@@ -370,7 +376,7 @@
             const route = BOSS_ROUTES[bossIndex];
             if (route) {
                 for (const step of route) {
-                    if (isHandlingDeath) break;
+                    if (isHandlingDeath || isReturning) break;
 
                     if (step.type === "js") {
                         console.log("  -> [DOM 제어 실행]");
@@ -418,7 +424,7 @@
         } catch (err) {
             console.log("[오류 발생]", err);
         } finally {
-            if (!isHandlingDeath) {
+            if (!isHandlingDeath && !isReturning) {
                 isRunning = false;
                 currentBossIndex = -1;
                 console.log("--- 보스 루틴 세션 종료 ---");
@@ -434,20 +440,19 @@
 
     // 🔴 [상시 전역 감시자] 사망 패널 감지 로직
     function checkAndHandleDeath() {
-        if (isHandlingDeath) return;
+        if (isHandlingDeath || isReturning) return;
 
         const deathOverlay = document.querySelector('div.death-overlay');
         if (deathOverlay) {
-            // 👉 핵심: 현재 보스를 잡는 중(isRunning === true)이라면 사망해도 즉시 부활하지 않고 대기합니다!
             if (isRunning) {
-                return; 
+                return; // 보스 잡는 중이면 대기
             }
 
             const buttons = deathOverlay.querySelectorAll('button');
             for (const btn of buttons) {
                 if (btn.innerText.includes("마을로 돌아가기")) {
                     isHandlingDeath = true;
-                    console.log("  -> [일반 사냥 사망 감지] '마을로 돌아가기' 버튼 발견! 즉시 부활하여 복귀합니다.");
+                    console.log("  -> [일반 사냥 사망 감지] '마을로 돌아가기' 버튼 발견! 부활 후속 조치를 시작합니다.");
                     
                     isRunning = false;
                     currentBossIndex = -1;
@@ -455,9 +460,36 @@
 
                     btn.click();
                     
+                    // 👉 부활 후속조치(마을 구석 이동 -> 포탈 탑승으로 초원 이동)를 완벽히 수행
                     setTimeout(async () => {
-                        await returnToDefaultHuntingGround();
+                        isReturning = true;
+                        
+                        // 1. 마을 귀환 정리 및 탈것 탑승 후 구석 이동 (`r`, `s`, `d`, `w`, `f`)
+                        await sleep(500);
+                        simulateKey('Escape');
+                        await sleep(300);
+                        console.log("  -> [부활 후속조치] 맵 구석으로 이동 및 포탈 탑승 시작");
+                        await holdKey('r', 1.0);
+                        await holdKey('s', 6.5);
+                        await holdKey('d', 2.5);
+                        await holdKey('w', 0.2);
+                        console.log("  -> [캠프파이어/포탈 상호작용] 'f' 키 입력");
+                        simulateKey('f');
+                        await sleep(1000);
+
+                        isReturning = false;
                         isHandlingDeath = false;
+                        console.log("  -> [부활 후속조치 완료] 초원 진입 완료. 예약된 보스가 있다면 처리합니다.");
+
+                        // 👉 부활 후속조치가 끝난 시점에 예약된 보스가 있다면 즉시 실행!
+                        if (pendingBossData) {
+                            let next = pendingBossData;
+                            pendingBossData = null;
+                            executeBossTask(next.index, next.name);
+                        } else {
+                            // 예약된 보스가 없다면 기본 사냥터 복귀 루틴 실행
+                            await returnToDefaultHuntingGround();
+                        }
                     }, 1500);
                     break;
                 }
@@ -509,7 +541,6 @@
         if (msgText.includes("처치되었습니다")) {
             console.log(`[보스 처치 감지] '${matchedBoss.name}'(이)가 이미 처치되었습니다.`);
             
-            // 만약 보스 사냥 중 사망해있던 상태라면, 처치 메시지를 본 순간 즉시 부활 창을 누르고 복귀 진행!
             const deathOverlay = document.querySelector('div.death-overlay');
             if (deathOverlay && isRunning && currentBossIndex === matchedBoss.index) {
                 const btn = Array.from(deathOverlay.querySelectorAll('button')).find(b => b.innerText.includes("마을로 돌아가기"));
@@ -543,6 +574,6 @@
     // 콘솔창 테스트용 전역 등록
     window.testBoss = executeBossTask;
 
-    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.8 가동 완료!");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.10 가동 완료!");
 
 })();
