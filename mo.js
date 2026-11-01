@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.15
+// @name         모닥 온라인 보스 오토봇 v3.16
 // @namespace    http://tampermonkey.net/
-// @version      3.15
+// @version      3.16
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -301,12 +301,6 @@
         await sleep(1000);
         simulateKey('Escape');
         await sleep(300);
-        
-        console.log("  -> [이동 조치] 맵 구석으로 이동 및 포탈/캠프파이어 탑승 시작");
-        await holdKey('r', 1.0);
-        await holdKey('s', 6.5);
-        await holdKey('d', 2.2);
-        await holdKey('w', 0.2);
 
         if (skipCampfire) {
             console.log("  -> [고대 점액군주] 캠프파이어 상호작용('f')을 생략합니다.");
@@ -571,6 +565,6 @@
     // 콘솔창 테스트용 전역 등록
     window.testBoss = executeBossTask;
 
-    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.15 가동 완료!");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.16 가동 완료!");
 
 })();
