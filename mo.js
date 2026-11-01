@@ -575,6 +575,6 @@
     // 콘솔창 테스트용 전역 등록
     window.testBoss = executeBossTask;
 
-    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.10 가동 완료!");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.11 가동 완료!");
 
 })();
