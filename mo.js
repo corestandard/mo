@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.18
+// @name         모닥 온라인 보스 오토봇 v3.19
 // @namespace    http://tampermonkey.net/
-// @version      3.18
+// @version      3.19
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -301,6 +301,9 @@
         await sleep(1000);
         simulateKey('Escape');
         await sleep(300);
+        simulateKey('r');
+        console.log("  -> [탈것타기] 'r' 키 입력");
+        await sleep(500);
 
         if (skipCampfire) {
             console.log("  -> [고대 점액군주] 캠프파이어 상호작용('f')을 생략합니다.");
@@ -465,17 +468,17 @@
                 if (btn.innerText.includes("마을로 돌아가기")) {
                     isHandlingDeath = true;
                     console.log("  -> [일반 사냥 사망 감지] '마을로 돌아가기' 버튼 발견! 즉시 부활 및 후속 조치를 시작합니다.");
-                    
+
                     isRunning = false;
                     currentBossIndex = -1;
                     pendingBossData = null;
 
                     btn.click();
-                    
+
                     // 부활 후속조치 및 '초원' 맵 진입 검증 로직
                     setTimeout(async () => {
                         isReturning = true;
-                        
+
                         await sleep(500);
                         simulateKey('Escape');
                         await sleep(300);
@@ -551,7 +554,7 @@
 
         if (msgText.includes("처치되었습니다")) {
             console.log(`[보스 처치 감지] '${matchedBoss.name}'(이)가 이미 처치되었습니다.`);
-            
+
             // 👉 이동 중이거나 사냥 중일 때 추적하던 보스가 잡힌 경우 즉시 취소 후 사냥터로 복귀
             if (isRunning && currentBossIndex === matchedBoss.index) {
                 console.log(`  -> [이동/사냥 중 조기 종료] 추적 중이던 보스가 이미 잡혔으므로 작업을 중단하고 사냥터로 복귀합니다.`);
@@ -587,6 +590,6 @@
     // 콘솔창 테스트용 전역 등록
     window.testBoss = executeBossTask;
 
-    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.18 가동 완료!");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.19 가동 완료!");
 
 })();
