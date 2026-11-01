@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.10
+// @name         모닥 온라인 보스 오토봇 v3.11
 // @namespace    http://tampermonkey.net/
-// @version      3.10
+// @version      3.11
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -471,7 +471,7 @@
                         console.log("  -> [부활 후속조치] 맵 구석으로 이동 및 포탈 탑승 시작");
                         await holdKey('r', 1.0);
                         await holdKey('s', 6.5);
-                        await holdKey('d', 2.5);
+                        await holdKey('d', 2.2);
                         await holdKey('w', 0.2);
                         console.log("  -> [캠프파이어/포탈 상호작용] 'f' 키 입력");
                         simulateKey('f');
