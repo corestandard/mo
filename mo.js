@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.19
+// @name         모닥 온라인 보스 오토봇 v3.20
 // @namespace    http://tampermonkey.net/
-// @version      3.19
+// @version      3.20
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -72,6 +72,12 @@
     // 일정 시간 대기 헬퍼
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+    // 👉 [추가] 인간적인 난수 슬립 헬퍼 (min ~ max 사이의 랜덤 밀리초 대기)
+    const randomSleep = (minMs, maxMs) => {
+        const randomTime = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
+        return new Promise(resolve => setTimeout(resolve, randomTime));
+    };
+
     // 현재 미니맵 맵 이름 가져오기 함수
     function getCurrentMapName() {
         const mapNameEl = document.getElementsByClassName("panel-list-name")[0];
@@ -86,10 +92,10 @@
             let currentMap = getCurrentMapName();
             if (currentMap.includes(expectedName)) {
                 console.log(`  -> [맵 진입 확인] 현재 위치: '${currentMap}'`);
-                await sleep(800);
+                await randomSleep(600, 1000);
                 return true;
             }
-            await sleep(300);
+            await randomSleep(200, 400);
         }
         console.log(`  -> [맵 진입 시간 초과] '${expectedName}'로 이동 실패`);
         return false;
@@ -161,7 +167,7 @@
             { type: "move", key: "f", duration: 1.0 },
             { type: "wait_map", name: "초원", timeout: 15 },
             { type: "move", key: "d", duration: 6.0 },
-            { type: "move", key: "s", duration: 1.0 },
+            { type: "move", key: "a", duration: 1.0 },
             { type: "hunt_boss" },
             { type: "return_hunting_ground" }
         ],
@@ -238,10 +244,10 @@
 
         console.log("\n--- [99] 기본 사냥터 복귀 시작 ---");
         await returnTownAndClickCampfire(false);
-        await sleep(1000);
+        await randomSleep(800, 1300);
 
         try {
-            await sleep(800);
+            await randomSleep(600, 1000);
             let success = false;
             let startAttempt = Date.now();
             while (Date.now() - startAttempt < 3000) {
@@ -250,7 +256,7 @@
                     success = true;
                     break;
                 } catch (err) {
-                    await sleep(200);
+                    await randomSleep(150, 300);
                 }
             }
         } catch(e) {}
@@ -260,7 +266,7 @@
         await holdKey("d", 1.0);
         await holdKey("s", 0.5);
         simulateKey('Escape');
-        await sleep(300);
+        await randomSleep(250, 450);
         console.log("  -> [사냥 시작] 'z' 키 입력 (기본 사냥터 자동전투 ON)");
         simulateKey('z');
         console.log("--- [99] 기본 사냥터 복귀 완료 ---");
@@ -275,9 +281,9 @@
         } else {
             console.log("  -> [귀환 전 정리] 혹시 남아있을지 모르는 UI 창 닫기 (ESC)");
             simulateKey('Escape');
-            await sleep(300);
+            await randomSleep(250, 450);
             simulateKey('z');
-            await sleep(300);
+            await randomSleep(250, 450);
 
             console.log("  -> [귀환 시도] B키 입력 시작");
             let success = false;
@@ -298,19 +304,19 @@
             }
         }
 
-        await sleep(1000);
+        await randomSleep(800, 1200);
         simulateKey('Escape');
-        await sleep(300);
+        await randomSleep(250, 400);
         simulateKey('r');
         console.log("  -> [탈것타기] 'r' 키 입력");
-        await sleep(500);
+        await randomSleep(400, 700);
 
         if (skipCampfire) {
             console.log("  -> [고대 점액군주] 캠프파이어 상호작용('f')을 생략합니다.");
         } else {
             console.log("  -> [캠프파이어 상호작용] 'f' 키 입력");
             simulateKey('f');
-            await sleep(1000);
+            await randomSleep(800, 1300);
         }
 
         return true;
@@ -323,20 +329,21 @@
 
         let startTime = Date.now();
         while (Date.now() - startTime < timeoutSec * 1000) {
-            await sleep(1000);
+            await randomSleep(900, 1300);
 
             const closeBtn = document.querySelector('section.loot-panel button[aria-label="전리품 닫기"]');
             if (closeBtn) {
                 console.log("  -> [전리품 확인 완료] '전리품 닫기' 버튼을 직접 클릭합니다.");
+                await randomSleep(300, 700);
                 closeBtn.click();
-                await sleep(1000);
+                await randomSleep(800, 1200);
                 return true;
             }
 
             if (Date.now() - startTime > timeoutSec * 1000) {
                 console.log("  -> [시간 초과] 전리품 창이 뜨지 않아 안전을 위해 탈출합니다.");
                 simulateKey('Escape');
-                await sleep(500);
+                await randomSleep(400, 600);
                 return false;
             }
         }
@@ -372,13 +379,12 @@
             const route = BOSS_ROUTES[bossIndex];
             if (route) {
                 for (const step of route) {
-                    // 👉 이동 중에 사망이나 조기 종료(보스 처치됨) 신호가 오면 즉시 중단
                     if (isHandlingDeath || isReturning || currentBossIndex === -1) break;
 
                     if (step.type === "js") {
                         console.log("  -> [DOM 제어 실행]");
                         try {
-                            await sleep(800);
+                            await randomSleep(600, 1000);
                             let success = false;
                             let startAttempt = Date.now();
                             while (Date.now() - startAttempt < 3000) {
@@ -387,7 +393,7 @@
                                     success = true;
                                     break;
                                 } catch (err) {
-                                    await sleep(200);
+                                    await randomSleep(150, 300);
                                 }
                             }
                             if (!success) {
@@ -396,15 +402,15 @@
                         } catch(e) {
                             console.log("  -> [DOM 제어 오류]", e);
                         }
-                        await sleep(step.wait * 1000);
+                        await randomSleep((step.wait * 1000) - 200, (step.wait * 1000) + 400);
                         simulateKey('Escape');
-                        await sleep(300);
+                        await randomSleep(250, 400);
                     } else if (step.type === "wait_map") {
                         const isSuccess = await waitForMap(step.name, step.timeout);
                         if (!isSuccess) {
                             console.log(`  -> [경로 이탈/진입 실패] '${step.name}' 진입 실패로 인해 보스 루틴을 중단하고 재시도합니다.`);
                             simulateKey('Escape');
-                            await sleep(500);
+                            await randomSleep(400, 600);
                             routeSuccess = false;
                             break;
                         }
@@ -414,9 +420,10 @@
                         } else {
                             await holdKey(step.key, step.duration);
                         }
+                        await randomSleep(150, 350);
                     } else if (step.type === "esc") {
                         simulateKey('Escape');
-                        await sleep((step.wait || 0.3) * 1000);
+                        await randomSleep(((step.wait || 0.3) * 1000), ((step.wait || 0.3) * 1000) + 300);
                     } else if (step.type === "hunt_boss") {
                         await huntBossAndLoot(240);
                     } else if (step.type === "return_hunting_ground") {
@@ -436,10 +443,9 @@
                 currentBossIndex = -1;
                 console.log("--- 보스 루틴 세션 종료 ---");
 
-                // 이동 중 맵 진입 실패로 루프가 깨진 경우 해당 보스 재출동
                 if (!routeSuccess && wasRunning && targetBossIndex !== -1) {
                     console.log(`  -> [보스 이동 실패] '${bossName}' 진입 실패로 인해 보스 출동을 다시 시도합니다.`);
-                    await sleep(1000);
+                    await randomSleep(800, 1500);
                     executeBossTask(bossIndex, bossName);
                     return;
                 }
@@ -447,6 +453,7 @@
                 if (pendingBossData) {
                     let next = pendingBossData;
                     pendingBossData = null;
+                    await randomSleep(500, 1000);
                     executeBossTask(next.index, next.name);
                 }
             }
@@ -467,44 +474,50 @@
             for (const btn of buttons) {
                 if (btn.innerText.includes("마을로 돌아가기")) {
                     isHandlingDeath = true;
-                    console.log("  -> [일반 사냥 사망 감지] '마을로 돌아가기' 버튼 발견! 즉시 부활 및 후속 조치를 시작합니다.");
+                    console.log("  -> [일반 사냥 사망 감지] '마을로 돌아가기' 버튼 발견! 잠시 후 인간적으로 부활을 시도합니다.");
 
                     isRunning = false;
                     currentBossIndex = -1;
                     pendingBossData = null;
 
-                    btn.click();
-
-                    // 부활 후속조치 및 '초원' 맵 진입 검증 로직
                     setTimeout(async () => {
-                        isReturning = true;
+                        await randomSleep(600, 1200);
+                        btn.click();
 
-                        await sleep(500);
-                        simulateKey('Escape');
-                        await sleep(300);
-                        console.log("  -> [부활 후속조치] 맵 구석으로 이동 및 포탈 탑승 시작");
-                        await holdKey('r', 1.0);
-                        await holdKey('s', 6.5);
-                        await holdKey('d', 2.2);
-                        await holdKey('w', 0.2);
-                        console.log("  -> [포탈 상호작용] 'f' 키 입력");
-                        simulateKey('f');
+                        // 부활 후속조치 및 '초원' 맵 진입 검증 로직
+                        setTimeout(async () => {
+                            isReturning = true;
 
-                        // '초원' 맵 진입 실시간 검증 (최대 15초 대기)
-                        await waitForMap("초원", 15);
+                            await randomSleep(400, 800);
+                            simulateKey('Escape');
+                            await randomSleep(250, 450);
+                            console.log("  -> [부활 후속조치] 맵 구석으로 이동 및 포탈 탑승 시작");
+                            await holdKey('r', 1.0);
+                            await holdKey('s', 6.5);
+                            await holdKey('d', 2.2);
+                            await holdKey('w', 0.2);
+                            
+                            await randomSleep(300, 600);
+                            console.log("  -> [포탈 상호작용] 'f' 키 입력");
+                            simulateKey('f');
 
-                        isReturning = false;
-                        isHandlingDeath = false;
-                        console.log("  -> [부활 후속조치 완료] 초원 진입 검증 완료. 예약된 보스가 있다면 처리합니다.");
+                            // '초원' 맵 진입 실시간 검증 (최대 15초 대기)
+                            await waitForMap("초원", 15);
 
-                        if (pendingBossData) {
-                            let next = pendingBossData;
-                            pendingBossData = null;
-                            executeBossTask(next.index, next.name);
-                        } else {
-                            await returnToDefaultHuntingGround();
-                        }
-                    }, 1500);
+                            isReturning = false;
+                            isHandlingDeath = false;
+                            console.log("  -> [부활 후속조치 완료] 초원 진입 검증 완료. 예약된 보스가 있다면 처리합니다.");
+
+                            if (pendingBossData) {
+                                let next = pendingBossData;
+                                pendingBossData = null;
+                                await randomSleep(500, 1000);
+                                executeBossTask(next.index, next.name);
+                            } else {
+                                await returnToDefaultHuntingGround();
+                            }
+                        }, 1500);
+                    }, 300);
                     break;
                 }
             }
@@ -549,7 +562,9 @@
 
         if (msgText.includes("출현")) {
             console.log(`[보스 출현 감지] [${matchedBoss.index}] ${matchedBoss.name}`);
-            executeBossTask(matchedBoss.index, matchedBoss.name);
+            setTimeout(() => {
+                executeBossTask(matchedBoss.index, matchedBoss.name);
+            }, Math.floor(Math.random() * 500) + 300);
         }
 
         if (msgText.includes("처치되었습니다")) {
@@ -571,16 +586,20 @@
                 const btn = Array.from(deathOverlay.querySelectorAll('button')).find(b => b.innerText.includes("마을로 돌아가기"));
                 if (btn) {
                     isHandlingDeath = true;
-                    console.log(`  -> [보스 사망 후 처치 확인] 보스가 잡혔으므로 사망 창을 닫고 복귀합니다.`);
+                    console.log(`  -> [보스 사망 후 처치 확인] 보스가 잡혔으므로 잠시 후 사망 창을 닫고 복귀합니다.`);
                     simulateKey('Escape');
                     isRunning = false;
                     currentBossIndex = -1;
                     pendingBossData = null;
-                    btn.click();
+                    
                     setTimeout(async () => {
-                        await returnToDefaultHuntingGround();
-                        isHandlingDeath = false;
-                    }, 1500);
+                        await randomSleep(400, 800);
+                        btn.click();
+                        setTimeout(async () => {
+                            await returnToDefaultHuntingGround();
+                            isHandlingDeath = false;
+                        }, 1500);
+                    }, 400);
                     return;
                 }
             }
@@ -590,6 +609,6 @@
     // 콘솔창 테스트용 전역 등록
     window.testBoss = executeBossTask;
 
-    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.19 가동 완료!");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.20 가동 완료!");
 
 })();
