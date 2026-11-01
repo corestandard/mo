@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 (단독 실행 버전)
+// @name         모닥 온라인 보스 오토봇 v3.10
 // @namespace    http://tampermonkey.net/
 // @version      3.10
 // @match        https://modakmmo.com/*
