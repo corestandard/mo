@@ -8,6 +8,7 @@
 // @updateURL    https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
 // ==/UserScript==
 
+
 (function() {
     'use strict';
 
