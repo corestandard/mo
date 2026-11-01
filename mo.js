@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         모닥 온라인 보스 오토봇 (단독 실행 버전)
 // @namespace    http://tampermonkey.net/
-// @version      3.4
+// @version      3.5
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
 // @updateURL    https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
 // ==/UserScript==
-
+// github test
 (function() {
     'use strict';
 
