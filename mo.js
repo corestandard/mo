@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.16
+// @name         모닥 온라인 보스 오토봇 v3.18
 // @namespace    http://tampermonkey.net/
-// @version      3.16
+// @version      3.18
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -231,7 +231,7 @@
     let isHandlingDeath = false;
     let isReturning = false;
 
-    // 👉 [원복됨] 기본 사냥터 복귀 함수: 마을 귀환(B) 후 구석 이동 및 캠프파이어(F)를 타서 초원으로 나간 뒤 웨이포인트 이동
+    // 기본 사냥터 복귀 함수
     async function returnToDefaultHuntingGround() {
         if (isReturning) return;
         isReturning = true;
@@ -267,7 +267,7 @@
         isReturning = false;
     }
 
-    // 마을 귀환 및 부활 후속 이동 (구석 이동 후 캠프파이어 상호작용)
+    // 마을 귀환 및 캠프파이어 상호작용
     async function returnTownAndClickCampfire(skipCampfire = false) {
         let currentMap = getCurrentMapName();
         if (currentMap === "모닥 마을") {
@@ -352,6 +352,7 @@
 
         isRunning = true;
         currentBossIndex = bossIndex;
+        let routeSuccess = true;
 
         try {
             console.log(`\n==========================================`);
@@ -368,7 +369,8 @@
             const route = BOSS_ROUTES[bossIndex];
             if (route) {
                 for (const step of route) {
-                    if (isHandlingDeath || isReturning) break;
+                    // 👉 이동 중에 사망이나 조기 종료(보스 처치됨) 신호가 오면 즉시 중단
+                    if (isHandlingDeath || isReturning || currentBossIndex === -1) break;
 
                     if (step.type === "js") {
                         console.log("  -> [DOM 제어 실행]");
@@ -395,7 +397,14 @@
                         simulateKey('Escape');
                         await sleep(300);
                     } else if (step.type === "wait_map") {
-                        await waitForMap(step.name, step.timeout);
+                        const isSuccess = await waitForMap(step.name, step.timeout);
+                        if (!isSuccess) {
+                            console.log(`  -> [경로 이탈/진입 실패] '${step.name}' 진입 실패로 인해 보스 루틴을 중단하고 재시도합니다.`);
+                            simulateKey('Escape');
+                            await sleep(500);
+                            routeSuccess = false;
+                            break;
+                        }
                     } else if (step.type === "move") {
                         if (step.key.length > 1) {
                             await holdTwoKeys(step.key, step.duration);
@@ -415,11 +424,22 @@
 
         } catch (err) {
             console.log("[오류 발생]", err);
+            routeSuccess = false;
         } finally {
             if (!isHandlingDeath && !isReturning) {
+                let wasRunning = isRunning;
                 isRunning = false;
+                let targetBossIndex = currentBossIndex;
                 currentBossIndex = -1;
                 console.log("--- 보스 루틴 세션 종료 ---");
+
+                // 이동 중 맵 진입 실패로 루프가 깨진 경우 해당 보스 재출동
+                if (!routeSuccess && wasRunning && targetBossIndex !== -1) {
+                    console.log(`  -> [보스 이동 실패] '${bossName}' 진입 실패로 인해 보스 출동을 다시 시도합니다.`);
+                    await sleep(1000);
+                    executeBossTask(bossIndex, bossName);
+                    return;
+                }
 
                 if (pendingBossData) {
                     let next = pendingBossData;
@@ -532,6 +552,17 @@
         if (msgText.includes("처치되었습니다")) {
             console.log(`[보스 처치 감지] '${matchedBoss.name}'(이)가 이미 처치되었습니다.`);
             
+            // 👉 이동 중이거나 사냥 중일 때 추적하던 보스가 잡힌 경우 즉시 취소 후 사냥터로 복귀
+            if (isRunning && currentBossIndex === matchedBoss.index) {
+                console.log(`  -> [이동/사냥 중 조기 종료] 추적 중이던 보스가 이미 잡혔으므로 작업을 중단하고 사냥터로 복귀합니다.`);
+                simulateKey('Escape');
+                isRunning = false;
+                currentBossIndex = -1;
+                pendingBossData = null;
+                returnToDefaultHuntingGround();
+                return;
+            }
+
             const deathOverlay = document.querySelector('div.death-overlay');
             if (deathOverlay && isRunning && currentBossIndex === matchedBoss.index) {
                 const btn = Array.from(deathOverlay.querySelectorAll('button')).find(b => b.innerText.includes("마을로 돌아가기"));
@@ -550,21 +581,12 @@
                     return;
                 }
             }
-
-            if (isRunning && currentBossIndex === matchedBoss.index) {
-                console.log(`  -> [조기 종료] 추적 중이던 보스가 이미 잡혔으므로 작업을 중단하고 사냥터로 복귀합니다.`);
-                simulateKey('Escape');
-                isRunning = false;
-                currentBossIndex = -1;
-                pendingBossData = null;
-                returnToDefaultHuntingGround();
-            }
         }
     }
 
     // 콘솔창 테스트용 전역 등록
     window.testBoss = executeBossTask;
 
-    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.16 가동 완료!");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.18 가동 완료!");
 
 })();
