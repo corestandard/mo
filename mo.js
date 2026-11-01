@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         모닥 온라인 보스 오토봇 (단독 실행 버전)
 // @namespace    http://tampermonkey.net/
-// @version      3.5
+// @version      3.6
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
 // @updateURL    https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
 // ==/UserScript==
-// github test
+
 (function() {
     'use strict';
 
@@ -161,7 +161,7 @@
             { type: "move", key: "f", duration: 1.0 },
             { type: "wait_map", name: "초원", timeout: 15 },
             { type: "move", key: "d", duration: 6.0 },
-            { type: "move", key: "a", duration: 0.8 },
+            { type: "move", key: "s", duration: 1.0 },
             { type: "hunt_boss" },
             { type: "return_hunting_ground" }
         ],
@@ -229,7 +229,39 @@
     let currentBossIndex = -1;
     let pendingBossData = null;
 
-    // 마을 귀환 및 캠프파이어 상호작용 함수 (skipCampfire 매개변수 추가)
+    // 기본 사냥터 복귀 공통 함수
+    async function returnToDefaultHuntingGround() {
+        console.log("\n--- [99] 기본 사냥터 복귀 시작 ---");
+        await returnTownAndClickCampfire(false);
+        await sleep(1000);
+
+        try {
+            await sleep(800);
+            let success = false;
+            let startAttempt = Date.now();
+            while (Date.now() - startAttempt < 3000) {
+                try {
+                    document.getElementsByClassName("waypoint-destination")[4].click();
+                    success = true;
+                    break;
+                } catch (err) {
+                    await sleep(200);
+                }
+            }
+        } catch(e) {}
+
+        await waitForMap("붉은숲 피난처", 15);
+        await holdKey("s", 1.5);
+        await holdKey("d", 1.0);
+        await holdKey("s", 0.5);
+        simulateKey('Escape');
+        await sleep(300);
+        console.log("  -> [사냥 시작] 'z' 키 입력 (기본 사냥터 자동전투 ON)");
+        simulateKey('z');
+        console.log("--- [99] 기본 사냥터 복귀 완료 ---");
+    }
+
+    // 마을 귀환 및 부활 후속 이동 (파이썬 코드의 구석 이동 및 탈것/상호작용 반영)
     async function returnTownAndClickCampfire(skipCampfire = false) {
         let currentMap = getCurrentMapName();
         if (currentMap === "모닥 마을") {
@@ -263,23 +295,26 @@
         await sleep(1000);
         simulateKey('Escape');
         await sleep(300);
-        console.log("  -> [탈것 탑승] 'r' 키 입력");
-        simulateKey('r');
-        await sleep(1000);
+        
+        // 👉 파이썬 코드의 부활 후속 이동 로직 적용 (구석으로 이동 후 상호작용)
+        console.log("  -> [부활 후속조치] 맵 구석으로 이동 및 포탈/캠프파이어 탑승 시작");
+        await holdKey('r', 1.0);
+        await holdKey('s', 6.5);
+        await holdKey('d', 2.5);
+        await holdKey('w', 0.2);
 
-        // 👉 캠프파이어 상호작용 생략 여부 체크
         if (skipCampfire) {
             console.log("  -> [고대 점액군주] 캠프파이어 상호작용('f')을 생략합니다.");
         } else {
             console.log("  -> [캠프파이어 상호작용] 'f' 키 입력");
             simulateKey('f');
-            await sleep(800);
+            await sleep(1000);
         }
 
         return true;
     }
 
-    // 전투 및 사냥 루틴
+    // 전투 및 사냥 루틴 (사망 감지 및 부활 버튼 클릭 처리)
     async function huntBossAndLoot(timeoutSec = 240) {
         console.log("  -> [전투 시작] 'z' 키 입력 (자동전투 ON)");
         simulateKey('z');
@@ -288,6 +323,17 @@
         while (Date.now() - startTime < timeoutSec * 1000) {
             await sleep(1000);
 
+            // 1. 사망 패널 감지 및 "마을로 돌아가기" 버튼 클릭
+            const deathBtn = document.querySelector('.death-panel button');
+            if (deathBtn) {
+                console.log("  -> [사망 감지] '마을로 돌아가기' 버튼을 클릭합니다.");
+                deathBtn.click();
+                await sleep(1500);
+                await returnToDefaultHuntingGround();
+                return false;
+            }
+
+            // 2. 전리품 창 닫기 감지
             const closeBtn = document.querySelector('section.loot-panel button[aria-label="전리품 닫기"]');
             if (closeBtn) {
                 console.log("  -> [전리품 확인 완료] '전리품 닫기' 버튼을 직접 클릭합니다.");
@@ -324,7 +370,6 @@
             console.log(`[보스 출동] [${bossIndex}] ${bossName}`);
             console.log(`==========================================`);
 
-            // 👉 고대 점액군주(인덱스 4)일 때는 마을 귀환은 하되 캠프파이어('f')만 생략
             if (bossIndex === 4) {
                 console.log("  -> [고대 점액군주 감지] 마을 귀환 후 캠프파이어 상호작용을 생략합니다.");
                 await returnTownAndClickCampfire(true);
@@ -371,36 +416,10 @@
                         simulateKey('Escape');
                         await sleep((step.wait || 0.3) * 1000);
                     } else if (step.type === "hunt_boss") {
-                        await huntBossAndLoot(240);
+                        let success = await huntBossAndLoot(240);
+                        if (!success && document.querySelector('.death-panel')) break;
                     } else if (step.type === "return_hunting_ground") {
-                        console.log("\n--- [99] 기본 사냥터 복귀 시작 ---");
-                        await returnTownAndClickCampfire(false); // 일반 복귀이므로 캠프파이어 정상 진행
-                        await sleep(1000);
-
-                        try {
-                            await sleep(800);
-                            let success = false;
-                            let startAttempt = Date.now();
-                            while (Date.now() - startAttempt < 3000) {
-                                try {
-                                    document.getElementsByClassName("waypoint-destination")[4].click();
-                                    success = true;
-                                    break;
-                                } catch (err) {
-                                    await sleep(200);
-                                }
-                            }
-                        } catch(e) {}
-
-                        await waitForMap("붉은숲 피난처", 15);
-                        await holdKey("s", 1.5);
-                        await holdKey("d", 1.0);
-                        await holdKey("s", 0.5);
-                        simulateKey('Escape');
-                        await sleep(300);
-                        console.log("  -> [사냥 시작] 'z' 키 입력 (기본 사냥터 자동전투 ON)");
-                        simulateKey('z');
-                        console.log("--- [99] 기본 사냥터 복귀 완료 ---");
+                        await returnToDefaultHuntingGround();
                     }
                 }
             }
@@ -420,7 +439,7 @@
         }
     }
 
-    // 채팅창 감지기 (보스 출현/처치 캐치)
+    // 채팅창 감지기 (보스 출현 및 처치 감지)
     const processedMessages = new Set();
     function handleWorldEventChat(node) {
         if (!node.classList || !node.classList.contains('is-world_event')) return;
@@ -440,6 +459,18 @@
         if (msgText.includes("출현")) {
             console.log(`[보스 출현 감지] [${matchedBoss.index}] ${matchedBoss.name}`);
             executeBossTask(matchedBoss.index, matchedBoss.name);
+        }
+
+        if (msgText.includes("처치되었습니다")) {
+            console.log(`[보스 처치 감지] '${matchedBoss.name}'(이)가 이미 처치되었습니다.`);
+            if (isRunning && currentBossIndex === matchedBoss.index) {
+                console.log(`  -> [조기 종료] 추적 중이던 보스가 이미 잡혔으므로 작업을 중단하고 사냥터로 복귀합니다.`);
+                simulateKey('Escape');
+                isRunning = false;
+                currentBossIndex = -1;
+                pendingBossData = null;
+                returnToDefaultHuntingGround();
+            }
         }
     }
 
@@ -463,6 +494,6 @@
     // 콘솔창 테스트용 전역 등록
     window.testBoss = executeBossTask;
 
-    console.log("헬퍼 가동 완료");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.6 가동 완료!");
 
 })();
