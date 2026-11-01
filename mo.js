@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         모닥 온라인 보스 오토봇 (단독 실행 버전)
 // @namespace    http://tampermonkey.net/
-// @version      3.6
+// @version      3.8
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -228,6 +228,7 @@
     let isRunning = false;
     let currentBossIndex = -1;
     let pendingBossData = null;
+    let isHandlingDeath = false;
 
     // 기본 사냥터 복귀 공통 함수
     async function returnToDefaultHuntingGround() {
@@ -261,7 +262,7 @@
         console.log("--- [99] 기본 사냥터 복귀 완료 ---");
     }
 
-    // 마을 귀환 및 부활 후속 이동 (파이썬 코드의 구석 이동 및 탈것/상호작용 반영)
+    // 마을 귀환 및 부활 후속 이동 (구석 이동 후 캠프파이어 상호작용)
     async function returnTownAndClickCampfire(skipCampfire = false) {
         let currentMap = getCurrentMapName();
         if (currentMap === "모닥 마을") {
@@ -296,7 +297,6 @@
         simulateKey('Escape');
         await sleep(300);
         
-        // 👉 파이썬 코드의 부활 후속 이동 로직 적용 (구석으로 이동 후 상호작용)
         console.log("  -> [부활 후속조치] 맵 구석으로 이동 및 포탈/캠프파이어 탑승 시작");
         await holdKey('r', 1.0);
         await holdKey('s', 6.5);
@@ -314,7 +314,7 @@
         return true;
     }
 
-    // 전투 및 사냥 루틴 (사망 감지 및 부활 버튼 클릭 처리)
+    // 전리품 창 체크 루틴
     async function huntBossAndLoot(timeoutSec = 240) {
         console.log("  -> [전투 시작] 'z' 키 입력 (자동전투 ON)");
         simulateKey('z');
@@ -323,17 +323,7 @@
         while (Date.now() - startTime < timeoutSec * 1000) {
             await sleep(1000);
 
-            // 1. 사망 패널 감지 및 "마을로 돌아가기" 버튼 클릭
-            const deathBtn = document.querySelector('.death-panel button');
-            if (deathBtn) {
-                console.log("  -> [사망 감지] '마을로 돌아가기' 버튼을 클릭합니다.");
-                deathBtn.click();
-                await sleep(1500);
-                await returnToDefaultHuntingGround();
-                return false;
-            }
-
-            // 2. 전리품 창 닫기 감지
+            // 전리품 창 닫기 감지
             const closeBtn = document.querySelector('section.loot-panel button[aria-label="전리품 닫기"]');
             if (closeBtn) {
                 console.log("  -> [전리품 확인 완료] '전리품 닫기' 버튼을 직접 클릭합니다.");
@@ -380,6 +370,8 @@
             const route = BOSS_ROUTES[bossIndex];
             if (route) {
                 for (const step of route) {
+                    if (isHandlingDeath) break;
+
                     if (step.type === "js") {
                         console.log("  -> [DOM 제어 실행]");
                         try {
@@ -416,8 +408,7 @@
                         simulateKey('Escape');
                         await sleep((step.wait || 0.3) * 1000);
                     } else if (step.type === "hunt_boss") {
-                        let success = await huntBossAndLoot(240);
-                        if (!success && document.querySelector('.death-panel')) break;
+                        await huntBossAndLoot(240);
                     } else if (step.type === "return_hunting_ground") {
                         await returnToDefaultHuntingGround();
                     }
@@ -427,22 +418,76 @@
         } catch (err) {
             console.log("[오류 발생]", err);
         } finally {
-            isRunning = false;
-            currentBossIndex = -1;
-            console.log("--- 보스 루틴 세션 종료 ---");
+            if (!isHandlingDeath) {
+                isRunning = false;
+                currentBossIndex = -1;
+                console.log("--- 보스 루틴 세션 종료 ---");
 
-            if (pendingBossData) {
-                let next = pendingBossData;
-                pendingBossData = null;
-                executeBossTask(next.index, next.name);
+                if (pendingBossData) {
+                    let next = pendingBossData;
+                    pendingBossData = null;
+                    executeBossTask(next.index, next.name);
+                }
             }
         }
     }
 
-    // 채팅창 감지기 (보스 출현 및 처치 감지)
+    // 🔴 [상시 전역 감시자] 사망 패널 감지 로직
+    function checkAndHandleDeath() {
+        if (isHandlingDeath) return;
+
+        const deathOverlay = document.querySelector('div.death-overlay');
+        if (deathOverlay) {
+            // 👉 핵심: 현재 보스를 잡는 중(isRunning === true)이라면 사망해도 즉시 부활하지 않고 대기합니다!
+            if (isRunning) {
+                return; 
+            }
+
+            const buttons = deathOverlay.querySelectorAll('button');
+            for (const btn of buttons) {
+                if (btn.innerText.includes("마을로 돌아가기")) {
+                    isHandlingDeath = true;
+                    console.log("  -> [일반 사냥 사망 감지] '마을로 돌아가기' 버튼 발견! 즉시 부활하여 복귀합니다.");
+                    
+                    isRunning = false;
+                    currentBossIndex = -1;
+                    pendingBossData = null;
+
+                    btn.click();
+                    
+                    setTimeout(async () => {
+                        await returnToDefaultHuntingGround();
+                        isHandlingDeath = false;
+                    }, 1500);
+                    break;
+                }
+            }
+        }
+    }
+
+    // 실시간 DOM 감시자 (채팅 및 사망 패널 통합 감시)
+    const globalObserver = new MutationObserver((mutations) => {
+        checkAndHandleDeath();
+
+        for (const mutation of mutations) {
+            for (const node of mutation.addedNodes) {
+                if (node.nodeType === 1) {
+                    if (node.classList && node.classList.contains('is-world_event')) {
+                        handleWorldEventChat(node);
+                    } else {
+                        const events = node.querySelectorAll?.('.chat-feed-item.is-world_event');
+                        events?.forEach(handleWorldEventChat);
+                    }
+                }
+            }
+        }
+    });
+
+    globalObserver.observe(document.body, { childList: true, subtree: true });
+
+    // 채팅창 이벤트 처리 함수
     const processedMessages = new Set();
     function handleWorldEventChat(node) {
-        if (!node.classList || !node.classList.contains('is-world_event')) return;
         const textEl = node.querySelector('.chat-msg-text');
         const timeEl = node.querySelector('.chat-msg-time');
         if (!textEl) return;
@@ -463,6 +508,27 @@
 
         if (msgText.includes("처치되었습니다")) {
             console.log(`[보스 처치 감지] '${matchedBoss.name}'(이)가 이미 처치되었습니다.`);
+            
+            // 만약 보스 사냥 중 사망해있던 상태라면, 처치 메시지를 본 순간 즉시 부활 창을 누르고 복귀 진행!
+            const deathOverlay = document.querySelector('div.death-overlay');
+            if (deathOverlay && isRunning && currentBossIndex === matchedBoss.index) {
+                const btn = Array.from(deathOverlay.querySelectorAll('button')).find(b => b.innerText.includes("마을로 돌아가기"));
+                if (btn) {
+                    isHandlingDeath = true;
+                    console.log(`  -> [보스 사망 후 처치 확인] 보스가 잡혔으므로 사망 창을 닫고 복귀합니다.`);
+                    simulateKey('Escape');
+                    isRunning = false;
+                    currentBossIndex = -1;
+                    pendingBossData = null;
+                    btn.click();
+                    setTimeout(async () => {
+                        await returnToDefaultHuntingGround();
+                        isHandlingDeath = false;
+                    }, 1500);
+                    return;
+                }
+            }
+
             if (isRunning && currentBossIndex === matchedBoss.index) {
                 console.log(`  -> [조기 종료] 추적 중이던 보스가 이미 잡혔으므로 작업을 중단하고 사냥터로 복귀합니다.`);
                 simulateKey('Escape');
@@ -474,26 +540,9 @@
         }
     }
 
-    const chatObserver = new MutationObserver((mutations) => {
-        for (const mutation of mutations) {
-            for (const node of mutation.addedNodes) {
-                if (node.nodeType === 1) {
-                    if (node.classList && node.classList.contains('is-world_event')) {
-                        handleWorldEventChat(node);
-                    } else {
-                        const events = node.querySelectorAll?.('.chat-feed-item.is-world_event');
-                        events?.forEach(handleWorldEventChat);
-                    }
-                }
-            }
-        }
-    });
-
-    chatObserver.observe(document.body, { childList: true, subtree: true });
-
     // 콘솔창 테스트용 전역 등록
     window.testBoss = executeBossTask;
 
-    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.6 가동 완료!");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.8 가동 완료!");
 
 })();
