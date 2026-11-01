@@ -244,7 +244,7 @@
 
         console.log("\n--- [99] 기본 사냥터 복귀 시작 ---");
         await returnTownAndClickCampfire(false);
-        await randomSleep(800, 1300);
+        await randomSleep(1500, 1873);
 
         try {
             await randomSleep(600, 1000);
@@ -334,7 +334,7 @@
             const closeBtn = document.querySelector('section.loot-panel button[aria-label="전리품 닫기"]');
             if (closeBtn) {
                 console.log("  -> [전리품 확인 완료] '전리품 닫기' 버튼을 직접 클릭합니다.");
-                await randomSleep(300, 700);
+                await randomSleep(1255, 1876);
                 closeBtn.click();
                 await randomSleep(800, 1200);
                 return true;
@@ -496,7 +496,7 @@
                             await holdKey('s', 6.5);
                             await holdKey('d', 2.2);
                             await holdKey('w', 0.2);
-                            
+
                             await randomSleep(300, 600);
                             console.log("  -> [포탈 상호작용] 'f' 키 입력");
                             simulateKey('f');
@@ -591,7 +591,7 @@
                     isRunning = false;
                     currentBossIndex = -1;
                     pendingBossData = null;
-                    
+
                     setTimeout(async () => {
                         await randomSleep(400, 800);
                         btn.click();
