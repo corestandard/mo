@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.24
+// @name         모닥 온라인 보스 오토봇 v3.25
 // @namespace    http://tampermonkey.net/
-// @version      3.24
+// @version      3.25
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -72,7 +72,7 @@
     // 일정 시간 대기 헬퍼
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-    // 👉 [추가] 인간적인 난수 슬립 헬퍼 (min ~ max 사이의 랜덤 밀리초 대기)
+    // 인간적인 난수 슬립 헬퍼 (min ~ max 사이의 랜덤 밀리초 대기)
     const randomSleep = (minMs, maxMs) => {
         const randomTime = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
         return new Promise(resolve => setTimeout(resolve, randomTime));
@@ -358,7 +358,7 @@
         return false;
     }
 
-    // 보스 수행 메인 함수 (지역 이동 실패 시 위치 기반 분기 대응 반영)
+    // 보스 수행 메인 함수
     async function executeBossTask(bossIndex, bossName) {
         if (isRunning || isReturning) {
             console.log(`[보스 예약됨] 현재 복귀/부활 후속 조치 중이거나 다른 보스 진행 중이므로 [${bossIndex}] ${bossName}을(를) 예약합니다.`);
@@ -418,21 +418,19 @@
                             simulateKey('Escape');
                             await randomSleep(400, 600);
 
-                            // 👉 맵 이동 실패 시 현재 위치 판별 분기 (마을 vs 필드)
                             let currentMap = getCurrentMapName();
                             console.log(`  -> [현재 위치 판별] '${currentMap}'`);
 
                             if (currentMap === "모닥 마을") {
-                                console.log("  -> [시나리오 1: 마을] 탈것 탑승 및 부활 후속조치 무빙 후 초원으로 재진입합니다.");
+                                console.log("  -> [시나리오 1: 마을] 탈것 탑승 및 부활 후속조치 무빙(w: 0.3초) 후 초원으로 재진입합니다.");
                                 simulateKey('Escape');
                                 await randomSleep(250, 450);
                                 simulateKey('r'); // 탈것 탑승
                                 await randomSleep(400, 600);
                                 
-                                // 부활 후속조치와 동일한 구석 이동 및 포탈 탑승 루트
                                 await holdKey('s', 6.5);
                                 await holdKey('d', 2.2);
-                                await holdKey('w', 0.2);
+                                await holdKey('w', 0.3); // 👉 w 0.3초 적용
                                 await randomSleep(300, 600);
                                 simulateKey('f'); // 포탈 상호작용
                                 await waitForMap("초원", 15);
@@ -528,7 +526,7 @@
                             
                             await holdKey('s', 6.5);
                             await holdKey('d', 2.2);
-                            await holdKey('w', 0.2);
+                            await holdKey('w', 0.3); // 👉 w 0.3초 적용
 
                             await randomSleep(300, 600);
                             console.log("  -> [포탈 상호작용] 'f' 키 입력");
@@ -603,7 +601,6 @@
         if (msgText.includes("처치되었습니다")) {
             console.log(`[보스 처치 감지] '${matchedBoss.name}'(이)가 이미 처치되었습니다.`);
 
-            // 👉 이동 중이거나 사냥 중일 때 추적하던 보스가 잡힌 경우 즉시 취소 후 사냥터로 복귀
             if (isRunning && currentBossIndex === matchedBoss.index) {
                 console.log(`  -> [이동/사냥 중 조기 종료] 추적 중이던 보스가 이미 잡혔으므로 작업을 중단하고 사냥터로 복귀합니다.`);
                 simulateKey('Escape');
@@ -642,6 +639,6 @@
     // 콘솔창 테스트용 전역 등록
     window.testBoss = executeBossTask;
 
-    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.24 가동 완료!");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.25 가동 완료!");
 
 })();
