@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.23
+// @name         모닥 온라인 보스 오토봇 v3.24
 // @namespace    http://tampermonkey.net/
-// @version      3.23
+// @version      3.24
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -252,7 +252,6 @@
             let startAttempt = Date.now();
             while (Date.now() - startAttempt < 3000) {
                 try {
-                    //document.getElementsByClassName("waypoint-destination")[4].click();
                     document.getElementsByClassName("waypoint-destination")[1].click();
                     success = true;
                     break;
@@ -261,13 +260,6 @@
                 }
             }
         } catch(e) {}
-
-        // 기존 렙업용 사냥터
-        //await waitForMap("붉은숲 피난처", 15);
-        //await randomSleep(500, 1450);
-        //await holdKey("s", 1.5);
-        //await holdKey("d", 1.0);
-        //await holdKey("s", 0.5);
 
         // 앵벌사냥터
         await waitForMap("망자의 묘지", 15);
@@ -278,7 +270,6 @@
         await waitForMap("황야", 15);
         await randomSleep(500, 767);
         await holdKey("a", 0.7);
-        //await holdKey("a", 2.8);
 
         simulateKey('Escape');
         await randomSleep(250, 450);
@@ -313,9 +304,7 @@
                     success = true;
                     break;
                 } else {
-                    //console.log("  -> [귀환 취소됨] W키 1.5초 이동 후 재시도합니다.");
                     console.log("  -> [귀환 취소됨] S키 4.0초 이동 후 재시도합니다.");
-                    //await holdKey('w', 1.5);
                     await holdKey('s', 4.0);
                 }
             }
@@ -369,7 +358,7 @@
         return false;
     }
 
-    // 보스 수행 메인 함수
+    // 보스 수행 메인 함수 (지역 이동 실패 시 위치 기반 분기 대응 반영)
     async function executeBossTask(bossIndex, bossName) {
         if (isRunning || isReturning) {
             console.log(`[보스 예약됨] 현재 복귀/부활 후속 조치 중이거나 다른 보스 진행 중이므로 [${bossIndex}] ${bossName}을(를) 예약합니다.`);
@@ -425,9 +414,33 @@
                     } else if (step.type === "wait_map") {
                         const isSuccess = await waitForMap(step.name, step.timeout);
                         if (!isSuccess) {
-                            console.log(`  -> [경로 이탈/진입 실패] '${step.name}' 진입 실패로 인해 보스 루틴을 중단하고 재시도합니다.`);
+                            console.log(`  -> [경로 이탈/진입 실패] '${step.name}' 진입 실패! 현재 위치를 파악하여 복구 시나리오를 실행합니다.`);
                             simulateKey('Escape');
                             await randomSleep(400, 600);
+
+                            // 👉 맵 이동 실패 시 현재 위치 판별 분기 (마을 vs 필드)
+                            let currentMap = getCurrentMapName();
+                            console.log(`  -> [현재 위치 판별] '${currentMap}'`);
+
+                            if (currentMap === "모닥 마을") {
+                                console.log("  -> [시나리오 1: 마을] 탈것 탑승 및 부활 후속조치 무빙 후 초원으로 재진입합니다.");
+                                simulateKey('Escape');
+                                await randomSleep(250, 450);
+                                simulateKey('r'); // 탈것 탑승
+                                await randomSleep(400, 600);
+                                
+                                // 부활 후속조치와 동일한 구석 이동 및 포탈 탑승 루트
+                                await holdKey('s', 6.5);
+                                await holdKey('d', 2.2);
+                                await holdKey('w', 0.2);
+                                await randomSleep(300, 600);
+                                simulateKey('f'); // 포탈 상호작용
+                                await waitForMap("초원", 15);
+                            } else {
+                                console.log("  -> [시나리오 2: 필드] 마을 귀환 후 보스 재이동을 준비합니다.");
+                                await returnTownAndClickCampfire(bossIndex === 4);
+                            }
+
                             routeSuccess = false;
                             break;
                         }
@@ -509,7 +522,10 @@
                             simulateKey('Escape');
                             await randomSleep(250, 450);
                             console.log("  -> [부활 후속조치] 맵 구석으로 이동 및 포탈 탑승 시작");
-                            await holdKey('r', 1.0);
+                            
+                            simulateKey('r'); // 탈것 탑승
+                            await randomSleep(400, 600);
+                            
                             await holdKey('s', 6.5);
                             await holdKey('d', 2.2);
                             await holdKey('w', 0.2);
@@ -626,6 +642,6 @@
     // 콘솔창 테스트용 전역 등록
     window.testBoss = executeBossTask;
 
-    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.23 가동 완료!");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.24 가동 완료!");
 
 })();
