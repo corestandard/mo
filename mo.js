@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.22
+// @name         모닥 온라인 보스 오토봇 v3.23
 // @namespace    http://tampermonkey.net/
-// @version      3.22
+// @version      3.23
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -277,7 +277,8 @@
         await randomSleep(500, 1450);
         await waitForMap("황야", 15);
         await randomSleep(500, 767);
-        await holdKey("a", 0.5);
+        await holdKey("a", 0.7);
+        //await holdKey("a", 2.8);
 
         simulateKey('Escape');
         await randomSleep(250, 450);
@@ -625,6 +626,6 @@
     // 콘솔창 테스트용 전역 등록
     window.testBoss = executeBossTask;
 
-    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.22 가동 완료!");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.23 가동 완료!");
 
 })();
