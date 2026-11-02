@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.20
+// @name         모닥 온라인 보스 오토봇 v3.21
 // @namespace    http://tampermonkey.net/
-// @version      3.20
+// @version      3.21
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -262,6 +262,7 @@
         } catch(e) {}
 
         await waitForMap("붉은숲 피난처", 15);
+        await randomSleep(500, 1450);
         await holdKey("s", 1.5);
         await holdKey("d", 1.0);
         await holdKey("s", 0.5);
@@ -609,6 +610,6 @@
     // 콘솔창 테스트용 전역 등록
     window.testBoss = executeBossTask;
 
-    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.20 가동 완료!");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.21 가동 완료!");
 
 })();
