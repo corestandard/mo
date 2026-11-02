@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.21
+// @name         모닥 온라인 보스 오토봇 v3.22
 // @namespace    http://tampermonkey.net/
-// @version      3.21
+// @version      3.22
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -252,7 +252,8 @@
             let startAttempt = Date.now();
             while (Date.now() - startAttempt < 3000) {
                 try {
-                    document.getElementsByClassName("waypoint-destination")[4].click();
+                    //document.getElementsByClassName("waypoint-destination")[4].click();
+                    document.getElementsByClassName("waypoint-destination")[1].click();
                     success = true;
                     break;
                 } catch (err) {
@@ -261,11 +262,23 @@
             }
         } catch(e) {}
 
-        await waitForMap("붉은숲 피난처", 15);
+        // 기존 렙업용 사냥터
+        //await waitForMap("붉은숲 피난처", 15);
+        //await randomSleep(500, 1450);
+        //await holdKey("s", 1.5);
+        //await holdKey("d", 1.0);
+        //await holdKey("s", 0.5);
+
+        // 앵벌사냥터
+        await waitForMap("망자의 묘지", 15);
         await randomSleep(500, 1450);
-        await holdKey("s", 1.5);
-        await holdKey("d", 1.0);
-        await holdKey("s", 0.5);
+        await holdKey("a", 2.0);
+        await holdKey("f", 1.0);
+        await randomSleep(500, 1450);
+        await waitForMap("황야", 15);
+        await randomSleep(500, 767);
+        await holdKey("a", 0.5);
+
         simulateKey('Escape');
         await randomSleep(250, 450);
         console.log("  -> [사냥 시작] 'z' 키 입력 (기본 사냥터 자동전투 ON)");
@@ -299,8 +312,10 @@
                     success = true;
                     break;
                 } else {
-                    console.log("  -> [귀환 취소됨] W키 1.5초 이동 후 재시도합니다.");
-                    await holdKey('w', 1.5);
+                    //console.log("  -> [귀환 취소됨] W키 1.5초 이동 후 재시도합니다.");
+                    console.log("  -> [귀환 취소됨] S키 4.0초 이동 후 재시도합니다.");
+                    //await holdKey('w', 1.5);
+                    await holdKey('s', 4.0);
                 }
             }
         }
@@ -610,6 +625,6 @@
     // 콘솔창 테스트용 전역 등록
     window.testBoss = executeBossTask;
 
-    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.21 가동 완료!");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.22 가동 완료!");
 
 })();
