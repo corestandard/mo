@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.41
+// @name         모닥 온라인 보스 오토봇 v3.42
 // @namespace    http://tampermonkey.net/
-// @version      3.41
+// @version      3.42
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -163,7 +163,8 @@
         { id: "castle_center_west", name: "잊혀진 고성 중앙부_서쪽 (집요한 추격의 반지)", escapeKey: "d", escapeSec: 2.0 },
         { id: "castle_center_south", name: "잊혀진 고성 중앙부_남쪽 (집요한 추격의 반지)", escapeKey: "w", escapeSec: 2.0 },
         { id: "castle_center_north", name: "잊혀진 고성 중앙부_북쪽 (집요한 추격의 반지)", escapeKey: "s", escapeSec: 2.0 },
-        { id: "shade_forest", name: "그늘숲 (오크의 전투나팔)", escapeKey: "w", escapeSec: 2.0 }
+        { id: "shade_forest_11", name: "그늘숲 11시 (오크의 전투나팔)", escapeKey: "w", escapeSec: 2.0 },
+        { id: "shade_forest_3", name: "그늘숲 3시 (오크의 전투나팔)", escapeKey: "d", escapeSec: 2.0 }
     ];
 
     let selectedHuntingGround = localStorage.getItem('modak_default_ground') || "wasteland_1";
@@ -516,7 +517,7 @@
                 await holdKey("d", 0.3);
                 break;
 
-            case "shade_forest":
+            case "shade_forest_11":
                 try { document.getElementsByClassName("waypoint-destination")[3].click(); } catch(e) {}
                 await waitForMap("뼈바람 협곡", 15);
                 await randomSleep(500, 1450);
@@ -531,6 +532,24 @@
                 await waitForMap("그늘숲", 15);
                 await randomSleep(500, 767);
                 await holdKey("w", 2.0);
+                break;
+
+            case "shade_forest_3":
+                try { document.getElementsByClassName("waypoint-destination")[3].click(); } catch(e) {}
+                await waitForMap("뼈바람 협곡", 15);
+                await randomSleep(500, 1450);
+                await holdKey("a", 1.3);
+                await holdKey("w", 0.8);
+                await holdKey("f", 1.0);
+                await waitForMap("협곡 진입로", 15);
+                await randomSleep(500, 767);
+                await holdKey("d", 4.3);
+                await holdKey("w", 2.2);
+                await holdKey("f", 1.0);
+                await waitForMap("그늘숲", 15);
+                await randomSleep(500, 767);
+                await holdKey("w", 1.5);
+                await holdKey("d", 3.0);
                 break;
 
             default:
@@ -939,6 +958,6 @@
     window.testBoss = executeBossTask;
     window.testHuntingGround = returnToDefaultHuntingGround;
 
-    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.41 가동 완료!");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.42 가동 완료!");
 
 })();
