@@ -175,12 +175,13 @@
         return HUNTING_GROUNDS.find(g => g.id === selectedHuntingGround) || HUNTING_GROUNDS[0];
     }
 
-    // 🖥️ UI 생성 함수
+    // 🖥️ UI 생성 함수 (단축키 씹힘 방지 보완 적용)
     function createSettingsUI() {
         if (document.getElementById('modak-bot-settings-ui')) return;
 
         const panel = document.createElement('div');
         panel.id = 'modak-bot-settings-ui';
+        panel.tabIndex = -1;
 
         let initialStyle = `
             position: fixed;
@@ -194,7 +195,6 @@
             font-size: 13px;
             border: 1px solid rgba(255,255,255,0.2);
             user-select: none;
-            pointer-events: none;
         `;
 
         if (savedPosX !== null && savedPosY !== null) {
@@ -210,14 +210,14 @@
         ).join('');
 
         panel.innerHTML = `
-            <div id="bot-ui-header" style="background: rgba(40,40,40,0.95); padding: 10px 12px; border-top-left-radius: 7px; border-top-right-radius: 7px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; cursor: move; border-bottom: 1px solid #444; pointer-events: auto;">
+            <div id="bot-ui-header" style="background: rgba(40,40,40,0.95); padding: 10px 12px; border-top-left-radius: 7px; border-top-right-radius: 7px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; cursor: move; border-bottom: 1px solid #444;">
                 <span style="pointer-events: none;">🛠️ 오토봇 기본 사냥터 설정</span>
                 <div>
-                    <span id="bot-ui-toggle" style="cursor: pointer; font-size: 11px; color: #aaa; margin-right: 8px; padding: 2px 4px; pointer-events: auto;">[접기]</span>
+                    <span id="bot-ui-toggle" style="cursor: pointer; font-size: 11px; color: #aaa; margin-right: 8px; padding: 2px 4px;">[접기]</span>
                 </div>
             </div>
-            <div id="bot-ui-content" style="padding: 12px 15px; pointer-events: auto;">
-                <select id="hunting-ground-select" style="width: 100%; padding: 6px; background: #333; color: #fff; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 12px; pointer-events: auto;">
+            <div id="bot-ui-content" style="padding: 12px 15px;">
+                <select id="hunting-ground-select" style="width: 100%; padding: 6px; background: #333; color: #fff; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 12px;">
                     ${optionsHTML}
                 </select>
                 <div style="margin-top: 8px; font-size: 11px; color: #88f; text-align: right;">v3.43 활성화됨</div>
@@ -225,6 +225,18 @@
         `;
 
         document.body.appendChild(panel);
+
+        const selectElem = document.getElementById('hunting-ground-select');
+        selectElem.addEventListener('change', (e) => {
+            selectedHuntingGround = e.target.value;
+            localStorage.setItem('modak_default_ground', selectedHuntingGround);
+            console.log(`[사냥터 변경] 기본 사냥터가 '${selectedHuntingGround}'(으)로 설정되었습니다.`);
+            selectElem.blur();
+        });
+
+        selectElem.addEventListener('click', () => {
+            window.focus();
+        });
 
         const header = document.getElementById('bot-ui-header');
         let isDragging = false;
@@ -272,12 +284,6 @@
             }
         }
 
-        document.getElementById('hunting-ground-select').addEventListener('change', (e) => {
-            selectedHuntingGround = e.target.value;
-            localStorage.setItem('modak_default_ground', selectedHuntingGround);
-            console.log(`[사냥터 변경] 기본 사냥터가 '${selectedHuntingGround}'(으)로 설정되었습니다.`);
-        });
-
         const toggleBtn = document.getElementById('bot-ui-toggle');
         const contentDiv = document.getElementById('bot-ui-content');
         let isCollapsed = false;
@@ -285,6 +291,7 @@
             isCollapsed = !isCollapsed;
             contentDiv.style.display = isCollapsed ? 'none' : 'block';
             toggleBtn.innerText = isCollapsed ? '[펼치기]' : '[접기]';
+            toggleBtn.blur();
         });
     }
 
