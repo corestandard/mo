@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.25
+// @name         모닥 온라인 보스 오토봇 v3.26
 // @namespace    http://tampermonkey.net/
-// @version      3.25
+// @version      3.26
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -430,7 +430,7 @@
                                 
                                 await holdKey('s', 6.5);
                                 await holdKey('d', 2.2);
-                                await holdKey('w', 0.3); // 👉 w 0.3초 적용
+                                await holdKey('w', 0.3);
                                 await randomSleep(300, 600);
                                 simulateKey('f'); // 포탈 상호작용
                                 await waitForMap("초원", 15);
@@ -526,7 +526,7 @@
                             
                             await holdKey('s', 6.5);
                             await holdKey('d', 2.2);
-                            await holdKey('w', 0.3); // 👉 w 0.3초 적용
+                            await holdKey('w', 0.3);
 
                             await randomSleep(300, 600);
                             console.log("  -> [포탈 상호작용] 'f' 키 입력");
@@ -616,7 +616,7 @@
                 const btn = Array.from(deathOverlay.querySelectorAll('button')).find(b => b.innerText.includes("마을로 돌아가기"));
                 if (btn) {
                     isHandlingDeath = true;
-                    console.log(`  -> [보스 사망 후 처치 확인] 보스가 잡혔으므로 잠시 후 사망 창을 닫고 복귀합니다.`);
+                    console.log(`  -> [보스 사망 후 처치 확인] 보스가 잡혔으므로 잠시 후 사망 창을 닫고 부활 후속조치를 진행합니다.`);
                     simulateKey('Escape');
                     isRunning = false;
                     currentBossIndex = -1;
@@ -625,9 +625,35 @@
                     setTimeout(async () => {
                         await randomSleep(400, 800);
                         btn.click();
+                        
+                        // 👉 👉 👉 [추가 완료] 보스 잡다 죽었을 때도 정석 부활 후속조치(구석 무빙 + 초원 포탈) 실행!
                         setTimeout(async () => {
-                            await returnToDefaultHuntingGround();
+                            isReturning = true;
+
+                            await randomSleep(400, 800);
+                            simulateKey('Escape');
+                            await randomSleep(250, 450);
+                            console.log("  -> [부활 후속조치] 맵 구석으로 이동 및 포탈 탑승 시작");
+
+                            simulateKey('r'); // 탈것 탑승
+                            await randomSleep(400, 600);
+
+                            await holdKey('s', 6.5);
+                            await holdKey('d', 2.2);
+                            await holdKey('w', 0.3);
+
+                            await randomSleep(300, 600);
+                            console.log("  -> [포탈 상호작용] 'f' 키 입력");
+                            simulateKey('f');
+
+                            // '초원' 맵 진입 실시간 검증
+                            await waitForMap("초원", 15);
+
+                            isReturning = false;
                             isHandlingDeath = false;
+                            console.log("  -> [부활 후속조치 완료] 초원 진입 검증 완료. 기본 사냥터로 복귀합니다.");
+
+                            await returnToDefaultHuntingGround();
                         }, 1500);
                     }, 400);
                     return;
@@ -639,6 +665,6 @@
     // 콘솔창 테스트용 전역 등록
     window.testBoss = executeBossTask;
 
-    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.25 가동 완료!");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.26 가동 완료!");
 
 })();
