@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.39
+// @name         모닥 온라인 보스 오토봇 v3.41
 // @namespace    http://tampermonkey.net/
-// @version      3.39
+// @version      3.41
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -154,23 +154,27 @@
 
     // 사냥터 목록 정의
     const HUNTING_GROUNDS = [
-        { id: "wasteland_1", name: "황야1 (큰거 - 선인장 액기스)" },
-        { id: "wasteland_2", name: "황야2 (작은거 - 선인장 액기스)" },
-        { id: "canyon_entry", name: "협곡 진입로 (피울음 가죽갑옷)" },
-        { id: "bone_canyon", name: "뼈바람 협곡 (강철비 화살통, 주술사의 혈석 반지)" },
-        { id: "archive", name: "망국의 기록 보관소 (잊히지 않은 기도)" },
-        { id: "castle_center_east", name: "잊혀진 고성 중앙부_동쪽 (집요한 추격의 반지)" },
-        { id: "castle_center_west", name: "잊혀진 고성 중앙부_서쪽 (집요한 추격의 반지)" },
-        { id: "castle_center_south", name: "잊혀진 고성 중앙부_남쪽 (집요한 추격의 반지)" },
-        { id: "castle_center_north", name: "잊혀진 고성 중앙부_북쪽 (집요한 추격의 반지)" },
-        { id: "shade_forest", name: "그늘숲 (오크의 전투나팔)" }
+        { id: "wasteland_1", name: "황야1 (큰거 - 선인장 액기스)", escapeKey: "s", escapeSec: 2.0 },
+        { id: "wasteland_2", name: "황야2 (작은거 - 선인장 액기스)", escapeKey: "s", escapeSec: 2.0 },
+        { id: "canyon_entry", name: "협곡 진입로 (피울음 가죽갑옷)", escapeKey: "d", escapeSec: 2.0 },
+        { id: "bone_canyon", name: "뼈바람 협곡 (강철비 화살통, 주술사의 혈석 반지)", escapeKey: "w", escapeSec: 2.0 },
+        { id: "archive", name: "망국의 기록 보관소 (잊히지 않은 기도)", escapeKey: "a", escapeSec: 2.0 },
+        { id: "castle_center_east", name: "잊혀진 고성 중앙부_동쪽 (집요한 추격의 반지)", escapeKey: "a", escapeSec: 2.0 },
+        { id: "castle_center_west", name: "잊혀진 고성 중앙부_서쪽 (집요한 추격의 반지)", escapeKey: "d", escapeSec: 2.0 },
+        { id: "castle_center_south", name: "잊혀진 고성 중앙부_남쪽 (집요한 추격의 반지)", escapeKey: "w", escapeSec: 2.0 },
+        { id: "castle_center_north", name: "잊혀진 고성 중앙부_북쪽 (집요한 추격의 반지)", escapeKey: "s", escapeSec: 2.0 },
+        { id: "shade_forest", name: "그늘숲 (오크의 전투나팔)", escapeKey: "w", escapeSec: 2.0 }
     ];
 
     let selectedHuntingGround = localStorage.getItem('modak_default_ground') || "wasteland_1";
     let savedPosX = localStorage.getItem('modak_ui_pos_x');
     let savedPosY = localStorage.getItem('modak_ui_pos_y');
 
-    // 🖥️ 단축키 씹힘 방지 및 드래그 기억 UI 생성 함수 (v3.39)
+    function getCurrentHuntingGroundConfig() {
+        return HUNTING_GROUNDS.find(g => g.id === selectedHuntingGround) || HUNTING_GROUNDS[0];
+    }
+
+    // 🖥️ UI 생성 함수
     function createSettingsUI() {
         if (document.getElementById('modak-bot-settings-ui')) return;
 
@@ -189,7 +193,7 @@
             font-size: 13px;
             border: 1px solid rgba(255,255,255,0.2);
             user-select: none;
-            pointer-events: none; /* 패널 자체는 마우스 입력을 통과시켜 게임 단축키가 씹히지 않도록 함 */
+            pointer-events: none;
         `;
 
         if (savedPosX !== null && savedPosY !== null) {
@@ -215,13 +219,12 @@
                 <select id="hunting-ground-select" style="width: 100%; padding: 6px; background: #333; color: #fff; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 12px; pointer-events: auto;">
                     ${optionsHTML}
                 </select>
-                <div style="margin-top: 8px; font-size: 11px; color: #88f; text-align: right;">v3.39 활성화됨</div>
+                <div style="margin-top: 8px; font-size: 11px; color: #88f; text-align: right;">v3.41 활성화됨</div>
             </div>
         `;
 
         document.body.appendChild(panel);
 
-        // 🖱️ 드래그 앤 드롭 이동 로직 구현
         const header = document.getElementById('bot-ui-header');
         let isDragging = false;
         let startX, startY, initialLeft, initialTop;
@@ -268,14 +271,12 @@
             }
         }
 
-        // 드롭다운 변경 이벤트 연동
         document.getElementById('hunting-ground-select').addEventListener('change', (e) => {
             selectedHuntingGround = e.target.value;
             localStorage.setItem('modak_default_ground', selectedHuntingGround);
             console.log(`[사냥터 변경] 기본 사냥터가 '${selectedHuntingGround}'(으)로 설정되었습니다.`);
         });
 
-        // 패널 접기/펼치기 토글 기능
         const toggleBtn = document.getElementById('bot-ui-toggle');
         const contentDiv = document.getElementById('bot-ui-content');
         let isCollapsed = false;
@@ -549,20 +550,76 @@
         isReturning = false;
     }
 
+    // 🔍 [DOM 기반] 마을 귀환 버튼 탐색 및 상태 판별 헬퍼
+    function getTownPortalButton() {
+        return document.querySelector('.hud-movement-actions button.quick-action-slot[aria-label="마을 귀환"], .hud-movement-actions button.quick-action-slot[aria-label="귀환 취소"]');
+    }
+
+    function isTownPortalActive() {
+        const btn = getTownPortalButton();
+        if (!btn) return false;
+        return btn.classList.contains('is-active') || btn.getAttribute('aria-label') === '귀환 취소';
+    }
+
+    // 🧠 [스마트 귀환 루틴] DOM 기반 is-active 감시 및 사냥터별 맞춤 회피 적용
+    async function smartReturnTown() {
+        let currentMap = getCurrentMapName();
+        if (currentMap === "모닥 마을") {
+            return true;
+        }
+
+        console.log("  -> [스마트 귀환 시작] UI 정돈 후 귀환 시도");
+        simulateKey('Escape');
+        await randomSleep(250, 400);
+        simulateKey('z');
+        await randomSleep(250, 400);
+
+        const currentGroundConfig = getCurrentHuntingGroundConfig();
+        const escapeKey = currentGroundConfig.escapeKey || 's';
+        const escapeSec = currentGroundConfig.escapeSec || 4.0;
+
+        for (let attempt = 1; attempt <= 10; attempt++) {
+            if (getCurrentMapName() === "모닥 마을") return true;
+
+            const portalBtn = getTownPortalButton();
+            if (portalBtn && !isTownPortalActive()) {
+                console.log(`  -> [귀환 시도 ${attempt}/10] '마을 귀환' 입력 (B)`);
+                portalBtn.click();
+                simulateKey('b');
+            }
+
+            let castStart = Date.now();
+            let isCastingInterrupted = false;
+
+            while (Date.now() - castStart < 3500) {
+                await randomSleep(200, 300);
+                if (getCurrentMapName() === "모닥 마을") {
+                    console.log("  -> [귀환 완료] 모닥 마을 진입 성공!");
+                    return true;
+                }
+                if (!isTownPortalActive() && Date.now() - castStart > 800) {
+                    isCastingInterrupted = true;
+                    break;
+                }
+            }
+
+            if (isCastingInterrupted) {
+                console.log(`  -> [귀환 취소 감지] 피격으로 인해 귀환이 끊겼습니다. 사냥터 맞춤 탈출방향 '${escapeKey.toUpperCase()}' ${escapeSec}초 이동 후 재시도합니다.`);
+                await holdKey(escapeKey, escapeSec);
+                await randomSleep(600, 1000);
+            }
+        }
+
+        console.log("  -> [귀환 최종 실패] 최대 시도 횟수를 초과했습니다.");
+        return false;
+    }
+
     async function returnTownAndClickCampfire(skipCampfire = false) {
         let currentMap = getCurrentMapName();
-        if (currentMap !== "모닥 마을") {
-            simulateKey('Escape');
-            await randomSleep(250, 450);
-            simulateKey('z');
-            await randomSleep(250, 450);
-
-            for (let i = 1; i <= 10; i++) {
-                if (getCurrentMapName() === "모닥 마을") break;
-                simulateKey('b');
-                if (await waitForMap("모닥 마을", 5.0)) break;
-                else await holdKey('s', 4.0);
-            }
+        if (currentMap === "모닥 마을") {
+            console.log(`  -> [마을 상태 확인] 현재 위치('${currentMap}')가 이미 '모닥 마을'이므로 귀환을 생략합니다.`);
+        } else {
+            await smartReturnTown();
         }
 
         await randomSleep(800, 1200);
@@ -571,18 +628,31 @@
 
         await ensureMount();
 
-        if (!skipCampfire) {
+        if (skipCampfire) {
+            console.log("  -> [고대 점액군주] 캠프파이어 상호작용('f')을 생략합니다.");
+        } else {
+            console.log("  -> [캠프파이어 상호작용] 'f' 키 입력");
             simulateKey('f');
             await randomSleep(800, 1300);
         }
+
         return true;
     }
 
+    // 전리품 창 체크 루틴 (보스 잡는 중 처치 메시지나 예약 발생 시 즉시 탈출 가능하도록 개선)
     async function huntBossAndLoot(timeoutSec = 240) {
         simulateKey('z');
         let startTime = Date.now();
         while (Date.now() - startTime < timeoutSec * 1000) {
             await randomSleep(900, 1300);
+
+            // 💡 사냥 중이라도 1번 마장기 예약이 들어왔거나 현재 보스가 이미 처치되어 판정이 끝났다면 즉시 탈출
+            if (pendingBossData && pendingBossData.index === 1 && currentBossIndex !== 1) {
+                console.log("  -> [긴급 탈출] 사냥 중 1번 마장기 예약 감지! 즉시 루틴을 중단합니다.");
+                simulateKey('Escape');
+                return "urgent_switch";
+            }
+
             const closeBtn = document.querySelector('section.loot-panel button[aria-label="전리품 닫기"]');
             if (closeBtn) {
                 await randomSleep(1255, 1876);
@@ -595,9 +665,17 @@
         return false;
     }
 
+    // 보스 수행 메인 함수
     async function executeBossTask(bossIndex, bossName) {
         if (isRunning || isReturning) {
-            pendingBossData = { index: bossIndex, name: bossName };
+            // 💡 만약 현재 1번 마장기가 예약되거나 들어오면 기존 예약을 덮어쓰고 최우선 대기
+            if (bossIndex === 1) {
+                console.log(`[우선순위 갱신] 1번 마장기가 예약되었습니다. 기존 예약을 교체합니다.`);
+                pendingBossData = { index: bossIndex, name: bossName };
+            } else if (!pendingBossData) {
+                console.log(`[보스 예약됨] 현재 다른 보스 진행 중이므로 [${bossIndex}] ${bossName}을(를) 예약합니다.`);
+                pendingBossData = { index: bossIndex, name: bossName };
+            }
             return;
         }
 
@@ -615,7 +693,9 @@
             const route = BOSS_ROUTES[bossIndex];
             if (route) {
                 for (const step of route) {
+                    // 💡 [핵심] 이동 중 언제든 1번 마장기 예약이 들어오면 즉시 중단 후 전환
                     if (pendingBossData && pendingBossData.index === 1 && currentBossIndex !== 1) {
+                        console.log(`  -> [1번 마장기 긴급 전환] 이동 중단 및 즉시 출동!`);
                         simulateKey('Escape');
                         routeSuccess = false;
                         break;
@@ -666,17 +746,17 @@
                         await randomSleep(((step.wait || 0.3) * 1000), ((step.wait || 0.3) * 1000) + 300);
                     } else if (step.type === "hunt_boss") {
                         if (pendingBossData && pendingBossData.index === 1) {
-                            let next = pendingBossData;
-                            pendingBossData = null;
-                            isRunning = false;
-                            currentBossIndex = -1;
-                            await randomSleep(500, 1000);
-                            executeBossTask(next.index, next.name);
-                            return;
+                            break; // 1번 예약 시 즉시 탈출
                         }
-                        await huntBossAndLoot(240);
+                        const lootResult = await huntBossAndLoot(240);
+                        if (lootResult === "urgent_switch") {
+                            routeSuccess = false;
+                            break;
+                        }
                     } else if (step.type === "return_hunting_ground") {
-                        if (pendingBossData && pendingBossData.index === 1) {
+                        // 💡 사냥 완료 후 복귀 직전, 다음 예약된 보스가 있는지 엄격히 검사!
+                        if (pendingBossData) {
+                            console.log(`  -> [예약된 보스 발견] 기본 사냥터 복귀를 생략하고 예약된 보스(${pendingBossData.name})로 즉시 이동합니다!`);
                             let next = pendingBossData;
                             pendingBossData = null;
                             isRunning = false;
@@ -698,6 +778,7 @@
                 let targetBossIndex = currentBossIndex;
                 currentBossIndex = -1;
 
+                // 💡 세션 종료 직전에도 예약된 보스가 있다면 곧바로 다음 보스로 출동!
                 if (pendingBossData) {
                     let next = pendingBossData;
                     pendingBossData = null;
@@ -715,6 +796,7 @@
         }
     }
 
+    // 사망 패널 감지
     function checkAndHandleDeath() {
         if (isHandlingDeath || isReturning) return;
 
@@ -798,10 +880,54 @@
         const matchedBoss = BOSS_LIST.find(b => msgText.includes(b.name));
         if (!matchedBoss) return;
 
+        // 1. 보스 출현 감지
         if (msgText.includes("출현")) {
+            console.log(`[보스 출현 감지] [${matchedBoss.index}] ${matchedBoss.name}`);
+
+            // 👉 1번 마장기인 경우 현재 무엇을 하든 즉시 최우선 개입
+            if (matchedBoss.index === 1) {
+                console.log("⚡ [긴급] 1번 망국의 마장기 출현! 모든 작업을 제쳐두고 즉시 출동합니다!");
+                pendingBossData = { index: matchedBoss.index, name: matchedBoss.name };
+                if (isRunning) {
+                    simulateKey('Escape'); // 현재 진행 중인 루틴 강제 차단 후 탈출 유도
+                } else {
+                    let next = pendingBossData;
+                    pendingBossData = null;
+                    executeBossTask(next.index, next.name);
+                }
+                return;
+            }
+
             setTimeout(() => {
                 executeBossTask(matchedBoss.index, matchedBoss.name);
             }, Math.floor(Math.random() * 500) + 300);
+        }
+
+        // 2. 보스 처치 감지 (이동 중이거나 사냥 중일 때 해당 보스가 잡혔을 경우 처리)
+        if (msgText.includes("처치되었습니다")) {
+            console.log(`[보스 처치 감지] '${matchedBoss.name}'(이)가 처치되었습니다.`);
+
+            // 만약 현재 추적/수행 중이던 보스가 잡힌 경우
+            if (isRunning && currentBossIndex === matchedBoss.index) {
+                console.log("  -> [목표 보스 처치 확인] 현재 진행 중인 보스 작업의 잔여 단계를 스킵합니다.");
+                simulateKey('Escape');
+                isRunning = false;
+                currentBossIndex = -1;
+
+                // 예약된 다음 보스가 있다면 곧바로 그 보스로 출발!
+                if (pendingBossData) {
+                    let next = pendingBossData;
+                    pendingBossData = null;
+                    setTimeout(() => {
+                        executeBossTask(next.index, next.name);
+                    }, 500);
+                    return;
+                }
+
+                // 예약된 보스가 없다면 비로소 기본 사냥터로 복귀
+                returnToDefaultHuntingGround();
+                return;
+            }
         }
     }
 
@@ -809,10 +935,10 @@
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
         createSettingsUI();
     }
-    // 콘솔창 테스트용 전역 등록
+
     window.testBoss = executeBossTask;
     window.testHuntingGround = returnToDefaultHuntingGround;
 
-    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.39 가동 완료!");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.41 가동 완료!");
 
 })();
