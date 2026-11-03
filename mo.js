@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.42
+// @name         모닥 온라인 보스 오토봇 v3.43
 // @namespace    http://tampermonkey.net/
-// @version      3.42
+// @version      3.43
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -205,7 +205,7 @@
 
         panel.style.cssText = initialStyle;
 
-        let optionsHTML = HUNTING_GROUNDS.map(g =>
+        let optionsHTML = HUNTING_GROUNDS.map(g => 
             `<option value="${g.id}" ${selectedHuntingGround === g.id ? 'selected' : ''}>${g.name}</option>`
         ).join('');
 
@@ -220,7 +220,7 @@
                 <select id="hunting-ground-select" style="width: 100%; padding: 6px; background: #333; color: #fff; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 12px; pointer-events: auto;">
                     ${optionsHTML}
                 </select>
-                <div style="margin-top: 8px; font-size: 11px; color: #88f; text-align: right;">v3.41 활성화됨</div>
+                <div style="margin-top: 8px; font-size: 11px; color: #88f; text-align: right;">v3.43 활성화됨</div>
             </div>
         `;
 
@@ -234,7 +234,7 @@
             isDragging = true;
             startX = e.clientX;
             startY = e.clientY;
-
+            
             const rect = panel.getBoundingClientRect();
             initialLeft = rect.left;
             initialTop = rect.top;
@@ -595,7 +595,7 @@
 
         const currentGroundConfig = getCurrentHuntingGroundConfig();
         const escapeKey = currentGroundConfig.escapeKey || 's';
-        const escapeSec = currentGroundConfig.escapeSec || 4.0;
+        const escapeSec = currentGroundConfig.escapeSec || 2.0;
 
         for (let attempt = 1; attempt <= 10; attempt++) {
             if (getCurrentMapName() === "모닥 마을") return true;
@@ -644,7 +644,7 @@
         await randomSleep(800, 1200);
         simulateKey('Escape');
         await randomSleep(250, 400);
-
+        
         await ensureMount();
 
         if (skipCampfire) {
@@ -658,14 +658,14 @@
         return true;
     }
 
-    // 전리품 창 체크 루틴 (보스 잡는 중 처치 메시지나 예약 발생 시 즉시 탈출 가능하도록 개선)
+    // 전리품 창 체크 루틴
     async function huntBossAndLoot(timeoutSec = 240) {
         simulateKey('z');
         let startTime = Date.now();
         while (Date.now() - startTime < timeoutSec * 1000) {
             await randomSleep(900, 1300);
 
-            // 💡 사냥 중이라도 1번 마장기 예약이 들어왔거나 현재 보스가 이미 처치되어 판정이 끝났다면 즉시 탈출
+            // 💡 사냥 중 1번 마장기 예약이 들어오면 즉시 탈출
             if (pendingBossData && pendingBossData.index === 1 && currentBossIndex !== 1) {
                 console.log("  -> [긴급 탈출] 사냥 중 1번 마장기 예약 감지! 즉시 루틴을 중단합니다.");
                 simulateKey('Escape');
@@ -687,7 +687,6 @@
     // 보스 수행 메인 함수
     async function executeBossTask(bossIndex, bossName) {
         if (isRunning || isReturning) {
-            // 💡 만약 현재 1번 마장기가 예약되거나 들어오면 기존 예약을 덮어쓰고 최우선 대기
             if (bossIndex === 1) {
                 console.log(`[우선순위 갱신] 1번 마장기가 예약되었습니다. 기존 예약을 교체합니다.`);
                 pendingBossData = { index: bossIndex, name: bossName };
@@ -712,7 +711,6 @@
             const route = BOSS_ROUTES[bossIndex];
             if (route) {
                 for (const step of route) {
-                    // 💡 [핵심] 이동 중 언제든 1번 마장기 예약이 들어오면 즉시 중단 후 전환
                     if (pendingBossData && pendingBossData.index === 1 && currentBossIndex !== 1) {
                         console.log(`  -> [1번 마장기 긴급 전환] 이동 중단 및 즉시 출동!`);
                         simulateKey('Escape');
@@ -765,7 +763,7 @@
                         await randomSleep(((step.wait || 0.3) * 1000), ((step.wait || 0.3) * 1000) + 300);
                     } else if (step.type === "hunt_boss") {
                         if (pendingBossData && pendingBossData.index === 1) {
-                            break; // 1번 예약 시 즉시 탈출
+                            break;
                         }
                         const lootResult = await huntBossAndLoot(240);
                         if (lootResult === "urgent_switch") {
@@ -773,7 +771,7 @@
                             break;
                         }
                     } else if (step.type === "return_hunting_ground") {
-                        // 💡 사냥 완료 후 복귀 직전, 다음 예약된 보스가 있는지 엄격히 검사!
+                        // 💡 사냥 완료 후 복귀 직전, 예약된 보스가 있으면 곧바로 그 보스로 출동!
                         if (pendingBossData) {
                             console.log(`  -> [예약된 보스 발견] 기본 사냥터 복귀를 생략하고 예약된 보스(${pendingBossData.name})로 즉시 이동합니다!`);
                             let next = pendingBossData;
@@ -797,7 +795,7 @@
                 let targetBossIndex = currentBossIndex;
                 currentBossIndex = -1;
 
-                // 💡 세션 종료 직전에도 예약된 보스가 있다면 곧바로 다음 보스로 출동!
+                // 💡 세션 종료 직전 예약된 보스가 있다면 곧바로 다음 보스로 출동!
                 if (pendingBossData) {
                     let next = pendingBossData;
                     pendingBossData = null;
@@ -908,7 +906,7 @@
                 console.log("⚡ [긴급] 1번 망국의 마장기 출현! 모든 작업을 제쳐두고 즉시 출동합니다!");
                 pendingBossData = { index: matchedBoss.index, name: matchedBoss.name };
                 if (isRunning) {
-                    simulateKey('Escape'); // 현재 진행 중인 루틴 강제 차단 후 탈출 유도
+                    simulateKey('Escape');
                 } else {
                     let next = pendingBossData;
                     pendingBossData = null;
@@ -922,7 +920,7 @@
             }, Math.floor(Math.random() * 500) + 300);
         }
 
-        // 2. 보스 처치 감지 (이동 중이거나 사냥 중일 때 해당 보스가 잡혔을 경우 처리)
+        // 2. 보스 처치 감지
         if (msgText.includes("처치되었습니다")) {
             console.log(`[보스 처치 감지] '${matchedBoss.name}'(이)가 처치되었습니다.`);
 
@@ -943,7 +941,6 @@
                     return;
                 }
 
-                // 예약된 보스가 없다면 비로소 기본 사냥터로 복귀
                 returnToDefaultHuntingGround();
                 return;
             }
@@ -958,6 +955,6 @@
     window.testBoss = executeBossTask;
     window.testHuntingGround = returnToDefaultHuntingGround;
 
-    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.42 가동 완료!");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.43 가동 완료!");
 
 })();
