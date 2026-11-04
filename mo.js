@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.52
+// @name         모닥 온라인 보스 오토봇 v3.53
 // @namespace    http://tampermonkey.net/
-// @version      3.52
+// @version      3.53
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -244,7 +244,7 @@
                 <select id="hunting-ground-select" style="width: 100%; padding: 6px; background: #333; color: #fff; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 12px;">
                     ${optionsHTML}
                 </select>
-                <div style="margin-top: 8px; font-size: 11px; color: #88f; text-align: right;">v3.52 활성화됨</div>
+                <div style="margin-top: 8px; font-size: 11px; color: #88f; text-align: right;">v3.53 활성화됨</div>
             </div>
         `;
 
@@ -462,7 +462,7 @@
     let isHandlingDeath = false;
     let isReturning = false;
     const defeatedBosses = new Set();
-    const bossQueue = []; // 💡 다중 보스 우선순위 대기열 (Queue)
+    const bossQueue = [];
 
     async function moveToSelectedHuntingGround() {
         console.log(`\n--- [99] 선택된 기본 사냥터 이동 시작: ${selectedHuntingGround} ---`);
@@ -743,7 +743,12 @@
         while (Date.now() - startTime < timeoutSec * 1000) {
             await randomSleep(900, 1300);
 
-            // 💡 사냥 중이라도 마장기가 큐 맨 앞에 끼어들면 즉시 긴급 탈출
+            // 사망 감지 시 사냥 루프 즉시 탈출
+            if (isHandlingDeath || document.querySelector('div.death-overlay')) {
+                return "dead";
+            }
+
+            // 사냥 중 1번 마장기가 큐 맨 앞에 새치기로 들어오면 즉시 긴급 탈출
             if (bossQueue.length > 0 && bossQueue[0].index === 1 && currentBossIndex !== 1) {
                 console.log("  -> [긴급 탈출] 사냥 중 1번 마장기 출현 감지! 즉시 루틴을 중단합니다.");
                 simulateKey('Escape');
@@ -762,18 +767,17 @@
         return false;
     }
 
-    // 💡 다중 우선순위 큐(Queue) 기반 보스 수행 메인 함수
     async function executeBossQueueWorker() {
-        if (isRunning || isReturning) return;
+        if (isRunning || isReturning || isHandlingDeath) return;
         isRunning = true;
 
         while (bossQueue.length > 0) {
-            // 큐의 맨 앞에서 다음 보스를 꺼냄
+            if (isHandlingDeath) break;
+
             const currentTarget = bossQueue.shift();
             const bossIndex = currentTarget.index;
             const bossName = currentTarget.name;
 
-            // 이미 처치된 보스라면 스킵
             if (defeatedBosses.has(bossIndex)) {
                 console.log(`  -> [대기열 스킵] '${bossName}'(은)는 이미 처치되었습니다.`);
                 continue;
@@ -796,7 +800,11 @@
                         for (let i = 0; i < route.length; i++) {
                             const step = route[i];
 
-                            // 1번 마장기가 큐 맨 앞에 새치기로 들어왔을 때 즉시 전환
+                            if (isHandlingDeath || document.querySelector('div.death-overlay')) {
+                                routeSuccess = false;
+                                break;
+                            }
+
                             if (bossQueue.length > 0 && bossQueue[0].index === 1 && currentBossIndex !== 1) {
                                 console.log(`  -> [1번 마장기 긴급 전환] 현재 보스('${bossName}') 중단! 마장기 처치 후 재도전하도록 큐에 보존합니다.`);
                                 simulateKey('Escape');
@@ -805,15 +813,12 @@
                                 break;
                             }
 
-                            // 이동 중 목표 보스가 처치되었는지 확인
                             if (defeatedBosses.has(currentBossIndex)) {
                                 console.log(`  -> [이동 중 취소] 현재 목표 '${bossName}' 처치 확인! 이동을 중단합니다.`);
                                 simulateKey('Escape');
                                 routeSuccess = false;
                                 break;
                             }
-
-                            if (isHandlingDeath || currentBossIndex === -1) break;
 
                             if (step.type === "js") {
                                 if (i === 0 && bossIndex !== 4) {
@@ -878,6 +883,9 @@
                                     routeSuccess = false;
                                     interruptedByMajangi = true;
                                     break;
+                                } else if (lootResult === "dead") {
+                                    routeSuccess = false;
+                                    break;
                                 }
                             } else if (step.type === "return_hunting_ground") {
                                 break;
@@ -889,9 +897,9 @@
                 routeSuccess = false;
             }
 
-            // 💡 마장기 출현으로 중단된 보스라면, 마장기 다음 차례로 다시 재도전할 수 있게 큐의 앞쪽에 삽입
+            if (isHandlingDeath) break;
+
             if (interruptedByMajangi && !defeatedBosses.has(bossIndex)) {
-                // 현재 큐의 0번째는 마장기이므로, 1번째 위치(마장기 바로 뒤)에 재삽입
                 bossQueue.splice(1, 0, currentTarget);
                 console.log(`  -> [대기열 복원] '${bossName}'을(를) 마장기 다음 순번으로 대기열에 유지합니다.`);
             }
@@ -902,14 +910,12 @@
 
         isRunning = false;
 
-        // 큐가 완전히 비었을 때 비로소 기본 사냥터로 복귀
         if (!isHandlingDeath) {
             console.log("  -> [보스 대기열 완전 소진] 모든 보스 완료! 기본 사냥터로 복귀합니다.");
             await returnToDefaultHuntingGround();
         }
     }
 
-    // 외부 호출 및 이벤트 등록 헬퍼
     function enqueueBossTask(bossIndex, bossName) {
         if (!isBossHuntingEnabled && bossIndex !== 1) {
             console.log(`  -> [보스 사냥 OFF] '${bossName}' 출동을 건너뜁니다.`);
@@ -921,75 +927,122 @@
             return;
         }
 
-        // 1번 망국의 마장기인 경우
         if (bossIndex === 1) {
-            // 중복 마장기 방지
             const alreadyInQueue = bossQueue.findIndex(b => b.index === 1);
             if (alreadyInQueue !== -1) bossQueue.splice(alreadyInQueue, 1);
 
             console.log("⚡ [긴급] 1번 망국의 마장기를 대기열 최우선(맨 앞)으로 등록합니다!");
             bossQueue.unshift({ index: bossIndex, name: bossName });
 
-            // 만약 현재 다른 일반 보스를 잡고 있다면 즉시 ESC 탈출 유도
             if (isRunning && currentBossIndex !== 1) {
                 simulateKey('Escape');
-            } else if (!isRunning) {
+            } else if (!isRunning && !isHandlingDeath) {
                 executeBossQueueWorker();
             }
             return;
         }
 
-        // 일반 보스인 경우 (이미 큐에 동일 보스가 없으면 대기열 맨 뒤에 추가)
         if (!bossQueue.some(b => b.index === bossIndex) && currentBossIndex !== bossIndex) {
             bossQueue.push({ index: bossIndex, name: bossName });
             console.log(`[보스 대기열 등록] [${bossIndex}] ${bossName} (대기 순번: ${bossQueue.length}번째)`);
         }
 
-        if (!isRunning) {
+        if (!isRunning && !isHandlingDeath) {
             executeBossQueueWorker();
         }
     }
 
-    function checkAndHandleDeath() {
-        if (isHandlingDeath || isReturning) return;
+    // 💡 [핵심] 보스 잡다 사망 시: 처치될 때까지 대기 ➔ 부활 ➔ 캠프파이어 정비 ➔ 다음 보스 or 기본 사냥터
+    async function checkAndHandleDeath() {
+        if (isHandlingDeath) return;
 
         const deathOverlay = document.querySelector('div.death-overlay');
-        if (deathOverlay) {
-            if (isRunning) return;
+        if (!deathOverlay) return;
 
-            const buttons = deathOverlay.querySelectorAll('button');
-            for (const btn of buttons) {
-                if (btn.innerText.includes("마을로 돌아가기")) {
-                    isHandlingDeath = true;
-                    isRunning = false;
-                    currentBossIndex = -1;
-                    bossQueue.length = 0; // 사망 시 대기열 초기화
+        isHandlingDeath = true;
+        const deadBossIndex = currentBossIndex;
+        const deadBossName = deadBossIndex !== -1 ? (BOSS_LIST[deadBossIndex]?.name || "보스") : null;
 
-                    setTimeout(async () => {
-                        await randomSleep(600, 1200);
-                        btn.click();
+        console.log(`💀 [캐릭터 사망 감지] 사망 화면 감지됨. (진행 중이던 보스: ${deadBossName || '없음'})`);
 
-                        setTimeout(async () => {
-                            isReturning = true;
-                            await randomSleep(400, 800);
-                            simulateKey('Escape');
-                            await randomSleep(250, 450);
-                            await ensureMount();
-                            await holdKey('s', 6.5);
-                            await holdKey('w', 3.6);
-                            await randomSleep(300, 600);
-                            simulateKey('f');
-                            await randomSleep(1500, 2000);
+        // 기존 실행 루틴 및 키 입력 차단
+        simulateKey('Escape');
+        isRunning = false;
 
-                            isReturning = false;
-                            isHandlingDeath = false;
-
-                            await returnToDefaultHuntingGround();
-                        }, 1500);
-                    }, 300);
+        // 1. 보스 잡던 중 사망한 경우: 보스가 처치될 때까지 누워서 대기
+        if (deadBossIndex !== -1 && !defeatedBosses.has(deadBossIndex)) {
+            console.log(`  -> [처치 대기] '${deadBossName}' 처치 메시지가 뜰 때까지 누워서 대기합니다 (최대 180초)...`);
+            const waitStart = Date.now();
+            while (Date.now() - waitStart < 180000) {
+                await randomSleep(1000, 1500);
+                if (defeatedBosses.has(deadBossIndex)) {
+                    console.log(`  -> [처치 완료 확인] '${deadBossName}' 처치 확인! 부활 절차를 시작합니다.`);
                     break;
                 }
             }
+        }
+
+        // 2. 부활 버튼('마을로 돌아가기') 클릭
+        console.log("  -> [부활 시도] '마을로 돌아가기' 버튼을 찾습니다.");
+        let revivalClicked = false;
+        const currentOverlay = document.querySelector('div.death-overlay');
+        if (currentOverlay) {
+            const buttons = currentOverlay.querySelectorAll('button');
+            for (const btn of buttons) {
+                if (btn.innerText.includes("마을로 돌아가기")) {
+                    await randomSleep(800, 1300);
+                    btn.click();
+                    revivalClicked = true;
+                    console.log("  -> [부활 클릭 완료] 마을로 복귀 중...");
+                    break;
+                }
+            }
+        }
+
+        if (!revivalClicked) {
+            console.log("  -> [버튼 미발견] 부활 버튼 클릭 실패. 상태를 리셋합니다.");
+            isHandlingDeath = false;
+            currentBossIndex = -1;
+            return;
+        }
+
+        // 3. 마을 로딩 대기 및 위치 정비 무빙
+        isReturning = true;
+        const villageLoaded = await waitForMap("모닥 마을", 15);
+        if (!villageLoaded) {
+            console.log("  -> [경고] 모닥 마을 로딩 확인 실패. 2초 대기 후 정비를 강행합니다.");
+            await randomSleep(2000, 2500);
+        }
+
+        await randomSleep(800, 1200);
+        simulateKey('Escape');
+        await randomSleep(300, 500);
+
+        await ensureMount();
+
+        console.log("  -> [부활 정비 이동] 캠프파이어 위치로 이동: S 6.5초 ➔ W 3.6초");
+        await holdKey('s', 6.5);
+        await holdKey('w', 3.6);
+        await randomSleep(400, 700);
+
+        console.log("  -> [캠프파이어 확인] 'f' 키 상호작용 후 닫기");
+        simulateKey('f');
+        await randomSleep(1500, 2000);
+        simulateKey('Escape');
+        await randomSleep(400, 600);
+
+        // 정비 상태 해제
+        isReturning = false;
+        isHandlingDeath = false;
+        currentBossIndex = -1;
+
+        // 4. 다음 보스 대기열 확인 또는 기본 사냥터 복귀
+        if (bossQueue.length > 0) {
+            console.log(`  -> [연계 출동] 사망 복구 완료! 남은 대기열(${bossQueue.length}마리) 보스 출동을 시작합니다.`);
+            executeBossQueueWorker();
+        } else {
+            console.log("  -> [복구 완료] 남은 보스 대기열이 없으므로 기본 사냥터로 복귀합니다.");
+            await returnToDefaultHuntingGround();
         }
     }
 
@@ -1031,13 +1084,11 @@
             console.log(`[보스 출현 감지] [${matchedBoss.index}] ${matchedBoss.name}`);
             defeatedBosses.delete(matchedBoss.index);
 
-            // 1번 마장기는 사냥 옵션과 무관하게 무조건 등록 및 출동
             if (matchedBoss.index === 1) {
                 enqueueBossTask(matchedBoss.index, matchedBoss.name);
                 return;
             }
 
-            // 보스 사냥 OFF 상태면 일반 보스는 대기열 등록도 무시
             if (!isBossHuntingEnabled) {
                 console.log(`  -> [보스 사냥 OFF] '${matchedBoss.name}' 출현을 무시하며, 현재 사냥을 계속 유지합니다.`);
                 return;
@@ -1053,15 +1104,15 @@
             console.log(`[보스 처치 감지] '${matchedBoss.name}'(이)가 처치되었습니다.`);
             defeatedBosses.add(matchedBoss.index);
 
-            // 💡 대기열에 쌓여있던 보스라면 대기열에서 즉시 제거
+            // 대기열에 쌓여있던 보스라면 큐에서 제거
             const queueIdx = bossQueue.findIndex(b => b.index === matchedBoss.index);
             if (queueIdx !== -1) {
                 console.log(`  -> [대기열 제거] 대기열에 있던 '${matchedBoss.name}'(이)가 처치되어 대기열에서 삭제합니다.`);
                 bossQueue.splice(queueIdx, 1);
             }
 
-            // 현재 잡고 있던 보스가 잡힌 경우 루프 조기 탈출
-            if (isRunning && currentBossIndex === matchedBoss.index) {
+            // 현재 잡던 보스가 처치되었을 때 (생존 상태에서 잡았을 때의 조기 스킵)
+            if (isRunning && currentBossIndex === matchedBoss.index && !isHandlingDeath) {
                 console.log("  -> [목표 보스 처치 확인] 현재 진행 중인 보스 작업의 잔여 단계를 스킵합니다.");
                 simulateKey('Escape');
             }
@@ -1073,10 +1124,9 @@
         createSettingsUI();
     }
 
-    // 콘솔 테스트용 헬퍼 연결
     window.testBoss = enqueueBossTask;
     window.testHuntingGround = returnToDefaultHuntingGround;
 
-    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.52 가동 완료!");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.53 가동 완료!");
 
 })();
