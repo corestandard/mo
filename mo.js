@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.50
+// @name         모닥 온라인 보스 오토봇 v3.51
 // @namespace    http://tampermonkey.net/
-// @version      3.50
+// @version      3.51
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -140,6 +140,7 @@
         return false;
     }
 
+    // 💡 Waypoint menu verification b-re-interaction
     async function waitForWaypointMenu(timeoutMs = 4000) {
         console.log("  -> [웨이포인트 대기] 목적지 창 렌더링 확인 중...");
         const start = Date.now();
@@ -151,7 +152,24 @@
             }
             await randomSleep(150, 250);
         }
-        console.log("  -> [웨이포인트 대기 시간 초과] 목적지 목록을 찾지 못했습니다.");
+        
+        // Ila ma tl3ash, sedd ay UI maftouh (bhal shop) w 3awed jjerreb 'f'
+        console.log("  -> [웨이포인트 미발견] 불필요 창 닫기(ESC) 후 캠프파이어(F) 재상호작용 시도...");
+        simulateKey('Escape');
+        await randomSleep(300, 500);
+        simulateKey('f');
+        
+        const retryStart = Date.now();
+        while (Date.now() - retryStart < 3000) {
+            const destinations = document.getElementsByClassName("waypoint-destination");
+            if (destinations && destinations.length > 0) {
+                await randomSleep(250, 400);
+                return true;
+            }
+            await randomSleep(150, 250);
+        }
+
+        console.log("  -> [웨이포인트 대기 최종 초과] 목적지 목록을 찾지 못했습니다.");
         return false;
     }
 
@@ -228,7 +246,7 @@
                 <select id="hunting-ground-select" style="width: 100%; padding: 6px; background: #333; color: #fff; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 12px;">
                     ${optionsHTML}
                 </select>
-                <div style="margin-top: 8px; font-size: 11px; color: #88f; text-align: right;">v3.50 활성화됨</div>
+                <div style="margin-top: 8px; font-size: 11px; color: #88f; text-align: right;">v3.51 활성화됨</div>
             </div>
         `;
 
@@ -457,74 +475,92 @@
             return;
         }
 
-        await waitForWaypointMenu(4000);
+        const menuReady = await waitForWaypointMenu(4000);
+        if (!menuReady) {
+            console.log("  -> [오류] 마을 웨이포인트 창 로딩 실패. 기본 사냥터 이동을 중단합니다.");
+            simulateKey('Escape');
+            return;
+        }
+
+        let mapSuccess = false;
 
         switch (selectedHuntingGround) {
             case "wasteland_1":
                 try { document.getElementsByClassName("waypoint-destination")[1].click(); } catch(e) {}
-                await waitForMap("망자의 묘지", 15);
+                mapSuccess = await waitForMap("망자의 묘지", 15);
+                if (!mapSuccess) break;
                 await randomSleep(500, 1450);
                 await holdKey("a", 2.0);
                 await holdKey("f", 1.0);
-                await waitForMap("황야", 15);
-                await randomSleep(500, 767);
-                await holdKey("a", 0.7);
+                if (await waitForMap("황야", 15)) {
+                    await randomSleep(500, 767);
+                    await holdKey("a", 0.7);
+                }
                 break;
 
             case "wasteland_2":
                 try { document.getElementsByClassName("waypoint-destination")[1].click(); } catch(e) {}
-                await waitForMap("망자의 묘지", 15);
+                mapSuccess = await waitForMap("망자의 묘지", 15);
+                if (!mapSuccess) break;
                 await randomSleep(500, 1450);
                 await holdKey("a", 2.0);
                 await holdKey("f", 1.0);
-                await waitForMap("황야", 15);
-                await randomSleep(500, 767);
-                await holdKey("a", 3.6);
+                if (await waitForMap("황야", 15)) {
+                    await randomSleep(500, 767);
+                    await holdKey("a", 3.6);
+                }
                 break;
 
             case "canyon_entry":
                 try { document.getElementsByClassName("waypoint-destination")[3].click(); } catch(e) {}
-                await waitForMap("뼈바람 협곡", 15);
+                mapSuccess = await waitForMap("뼈바람 협곡", 15);
+                if (!mapSuccess) break;
                 await randomSleep(500, 1450);
                 await holdKey("a", 1.3);
                 await holdKey("w", 0.8);
                 await holdKey("f", 1.0);
-                await waitForMap("협곡 진입로", 15);
-                await randomSleep(500, 767);
-                await holdKey("w", 1.5);
+                if (await waitForMap("협곡 진입로", 15)) {
+                    await randomSleep(500, 767);
+                    await holdKey("w", 1.5);
+                }
                 break;
 
             case "bone_canyon":
                 try { document.getElementsByClassName("waypoint-destination")[3].click(); } catch(e) {}
-                await waitForMap("뼈바람 협곡", 15);
+                mapSuccess = await waitForMap("뼈바람 협곡", 15);
+                if (!mapSuccess) break;
                 await randomSleep(500, 767);
                 await holdKey("s", 2.2);
                 break;
 
             case "archive":
                 try { document.getElementsByClassName("waypoint-destination")[2].click(); } catch(e) {}
-                await waitForMap("잊혀진 고성 중앙부", 15);
+                mapSuccess = await waitForMap("잊혀진 고성 중앙부", 15);
+                if (!mapSuccess) break;
                 await randomSleep(500, 1450);
                 await holdKey("a", 1.5);
                 await holdKey("w", 1.5);
                 await holdKey("f", 1.0);
-                await waitForMap("망국의 기록보관소", 15);
-                await randomSleep(500, 767);
-                await holdKey("d", 1.7);
-                await holdKey("w", 0.6);
-                await holdKey("f", 1.0);
+                if (await waitForMap("망국의 기록보관소", 15)) {
+                    await randomSleep(500, 767);
+                    await holdKey("d", 1.7);
+                    await holdKey("w", 0.6);
+                    await holdKey("f", 1.0);
+                }
                 break;
 
             case "castle_center_south":
                 try { document.getElementsByClassName("waypoint-destination")[2].click(); } catch(e) {}
-                await waitForMap("잊혀진 고성 중앙부", 15);
+                mapSuccess = await waitForMap("잊혀진 고성 중앙부", 15);
+                if (!mapSuccess) break;
                 await randomSleep(500, 1450);
                 await holdKey("s", 2.3);
                 break;
 
             case "castle_center_west":
                 try { document.getElementsByClassName("waypoint-destination")[2].click(); } catch(e) {}
-                await waitForMap("잊혀진 고성 중앙부", 15);
+                mapSuccess = await waitForMap("잊혀진 고성 중앙부", 15);
+                if (!mapSuccess) break;
                 await randomSleep(500, 1450);
                 await holdKey("a", 2.8);
                 await holdKey("s", 0.2);
@@ -532,14 +568,16 @@
 
             case "castle_center_east":
                 try { document.getElementsByClassName("waypoint-destination")[2].click(); } catch(e) {}
-                await waitForMap("잊혀진 고성 중앙부", 15);
+                mapSuccess = await waitForMap("잊혀진 고성 중앙부", 15);
+                if (!mapSuccess) break;
                 await randomSleep(500, 1450);
                 await holdKey("d", 2.5);
                 break;
 
             case "castle_center_north":
                 try { document.getElementsByClassName("waypoint-destination")[2].click(); } catch(e) {}
-                await waitForMap("잊혀진 고성 중앙부", 15);
+                mapSuccess = await waitForMap("잊혀진 고성 중앙부", 15);
+                if (!mapSuccess) break;
                 await randomSleep(500, 1450);
                 await holdKey("w", 2.5);
                 await holdKey("d", 0.3);
@@ -547,37 +585,43 @@
 
             case "shade_forest_11":
                 try { document.getElementsByClassName("waypoint-destination")[3].click(); } catch(e) {}
-                await waitForMap("뼈바람 협곡", 15);
+                mapSuccess = await waitForMap("뼈바람 협곡", 15);
+                if (!mapSuccess) break;
                 await randomSleep(500, 1450);
                 await holdKey("a", 1.3);
                 await holdKey("w", 0.8);
                 await holdKey("f", 1.0);
-                await waitForMap("협곡 진입로", 15);
-                await randomSleep(500, 767);
-                await holdKey("d", 4.3);
-                await holdKey("w", 2.2);
-                await holdKey("f", 1.0);
-                await waitForMap("그늘숲", 15);
-                await randomSleep(500, 767);
-                await holdKey("w", 2.0);
+                if (await waitForMap("협곡 진입로", 15)) {
+                    await randomSleep(500, 767);
+                    await holdKey("d", 4.3);
+                    await holdKey("w", 2.2);
+                    await holdKey("f", 1.0);
+                    if (await waitForMap("그늘숲", 15)) {
+                        await randomSleep(500, 767);
+                        await holdKey("w", 2.0);
+                    }
+                }
                 break;
 
             case "shade_forest_3":
                 try { document.getElementsByClassName("waypoint-destination")[3].click(); } catch(e) {}
-                await waitForMap("뼈바람 협곡", 15);
+                mapSuccess = await waitForMap("뼈바람 협곡", 15);
+                if (!mapSuccess) break;
                 await randomSleep(500, 1450);
                 await holdKey("a", 1.3);
                 await holdKey("w", 0.8);
                 await holdKey("f", 1.0);
-                await waitForMap("협곡 진입로", 15);
-                await randomSleep(500, 767);
-                await holdKey("d", 4.3);
-                await holdKey("w", 2.2);
-                await holdKey("f", 1.0);
-                await waitForMap("그늘숲", 15);
-                await randomSleep(500, 767);
-                await holdKey("w", 1.5);
-                await holdKey("d", 3.0);
+                if (await waitForMap("협곡 진입로", 15)) {
+                    await randomSleep(500, 767);
+                    await holdKey("d", 4.3);
+                    await holdKey("w", 2.2);
+                    await holdKey("f", 1.0);
+                    if (await waitForMap("그늘숲", 15)) {
+                        await randomSleep(500, 767);
+                        await holdKey("w", 1.5);
+                        await holdKey("d", 3.0);
+                    }
+                }
                 break;
 
             default:
@@ -586,8 +630,12 @@
 
         simulateKey('Escape');
         await randomSleep(250, 450);
-        simulateKey('z');
-        console.log("--- [99] 기본 사냥터 이동 완료 ---");
+        if (mapSuccess) {
+            simulateKey('z');
+            console.log("--- [99] 기본 사냥터 이동 완료 ---");
+        } else {
+            console.log("--- [99] 기본 사냥터 맵 이동 실패로 키 입력을 건너뜁니다 ---");
+        }
     }
 
     async function returnToDefaultHuntingGround() {
@@ -715,14 +763,12 @@
         return false;
     }
 
-    // 💡 단일 루프 큐 방식으로 개편된 보스 수행 메인 함수
     async function executeBossTask(initialBossIndex, initialBossName) {
         if (!isBossHuntingEnabled && initialBossIndex !== 1) {
             console.log(`  -> [보스 사냥 OFF] '${initialBossName}' 출동을 건너뜁니다.`);
             return;
         }
 
-        // 이미 실행 중이면 예약만 등록하고 메인 루프에 위임
         if (isRunning || isReturning) {
             if (initialBossIndex === 1) {
                 console.log(`[우선순위 갱신] 1번 마장기가 예약되었습니다. 기존 예약을 교체합니다.`);
@@ -737,7 +783,6 @@
         isRunning = true;
         let currentTarget = { index: initialBossIndex, name: initialBossName };
 
-        // 큐 소모 메인 루프 (예약이 있으면 연달아 처리)
         while (currentTarget) {
             let bossIndex = currentTarget.index;
             let bossName = currentTarget.name;
@@ -761,7 +806,6 @@
                             for (let i = 0; i < route.length; i++) {
                                 const step = route[i];
 
-                                // 1번 마장기 긴급 전환 확인
                                 if (pendingBossData && pendingBossData.index === 1 && currentBossIndex !== 1) {
                                     console.log(`  -> [1번 마장기 긴급 전환] 현재 보스 중단 및 마장기 전환!`);
                                     simulateKey('Escape');
@@ -769,7 +813,6 @@
                                     break;
                                 }
 
-                                // 이동 중 목표 보스가 처치되었는지 확인
                                 if (defeatedBosses.has(currentBossIndex)) {
                                     console.log(`  -> [이동 중 취소] 현재 목표 '${bossName}' 처치 확인! 이동을 중단합니다.`);
                                     simulateKey('Escape');
@@ -843,7 +886,6 @@
                                         break;
                                     }
                                 } else if (step.type === "return_hunting_ground") {
-                                    // 💡 보스 사냥 완료! 예약이 있으면 루프를 계속 돌고, 없으면 기본 사냥터로
                                     break;
                                 }
                             }
@@ -854,7 +896,6 @@
                 }
             }
 
-            // 💡 현재 보스 루틴 종료 후 예약 검사 (재귀 호출 대신 큐 전환)
             if (pendingBossData && !defeatedBosses.has(pendingBossData.index) && (isBossHuntingEnabled || pendingBossData.index === 1)) {
                 console.log(`  -> [예약 연계 출동] 다음 예약된 보스(${pendingBossData.name})로 전환합니다!`);
                 currentTarget = pendingBossData;
@@ -869,7 +910,6 @@
         currentBossIndex = -1;
         isRunning = false;
 
-        // 모든 보스 처치 또는 취소 후 기본 사냥터 복귀
         if (!isHandlingDeath) {
             console.log("  -> [보스 루틴 완전 종료] 기본 사냥터로 복귀합니다.");
             await returnToDefaultHuntingGround();
@@ -959,12 +999,11 @@
         const matchedBoss = BOSS_LIST.find(b => msgText.includes(b.name));
         if (!matchedBoss) return;
 
-        // 1. 보스 출현 감지
+        // 1. Boss Spawn
         if (msgText.includes("출현")) {
             console.log(`[보스 출현 감지] [${matchedBoss.index}] ${matchedBoss.name}`);
             defeatedBosses.delete(matchedBoss.index);
 
-            // 1번 마장기는 항상 출동
             if (matchedBoss.index === 1) {
                 console.log("⚡ [긴급] 1번 망국의 마장기 출현! (사냥 옵션 무시 및 즉시 출동)");
                 pendingBossData = { index: matchedBoss.index, name: matchedBoss.name };
@@ -978,7 +1017,6 @@
                 return;
             }
 
-            // 보스 사냥 OFF 상태면 일반 보스는 완전 무시
             if (!isBossHuntingEnabled) {
                 console.log(`  -> [보스 사냥 OFF] '${matchedBoss.name}' 출현을 무시하며, 현재 사냥을 계속 유지합니다.`);
                 return;
@@ -989,7 +1027,7 @@
             }, Math.floor(Math.random() * 500) + 300);
         }
 
-        // 2. 보스 처치 감지
+        // 2. Boss Defeated
         if (msgText.includes("처치되었습니다")) {
             console.log(`[보스 처치 감지] '${matchedBoss.name}'(이)가 처치되었습니다.`);
             defeatedBosses.add(matchedBoss.index);
@@ -999,7 +1037,6 @@
                 pendingBossData = null;
             }
 
-            // 현재 잡던 보스가 잡힌 경우 루프 조기 탈출 유도
             if (isRunning && currentBossIndex === matchedBoss.index) {
                 console.log("  -> [목표 보스 처치 확인] 현재 진행 중인 보스 작업의 잔여 단계를 스킵합니다.");
                 simulateKey('Escape');
@@ -1015,6 +1052,6 @@
     window.testBoss = executeBossTask;
     window.testHuntingGround = returnToDefaultHuntingGround;
 
-    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.50 가동 완료!");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.51 가동 완료!");
 
 })();
