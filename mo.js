@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.46
+// @name         모닥 온라인 보스 오토봇 v3.49
 // @namespace    http://tampermonkey.net/
-// @version      3.46
+// @version      3.49
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -170,6 +170,7 @@
     ];
 
     let selectedHuntingGround = localStorage.getItem('modak_default_ground') || "wasteland_1";
+    let isBossHuntingEnabled = localStorage.getItem('modak_boss_hunt_enabled') !== 'false';
     let savedPosX = localStorage.getItem('modak_ui_pos_x');
     let savedPosY = localStorage.getItem('modak_ui_pos_y');
 
@@ -218,14 +219,30 @@
                 </div>
             </div>
             <div id="bot-ui-content" style="padding: 12px 15px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                    <span style="font-size: 12px; font-weight: bold;">보스 자동 사냥:</span>
+                    <button id="boss-hunt-toggle-btn" style="padding: 4px 12px; font-size: 11px; font-weight: bold; border-radius: 4px; border: none; cursor: pointer; background: ${isBossHuntingEnabled ? '#2e7d32' : '#c62828'}; color: #fff;">
+                        ${isBossHuntingEnabled ? 'ON (일반 보스 진행)' : 'OFF (마장기만 출동)'}
+                    </button>
+                </div>
                 <select id="hunting-ground-select" style="width: 100%; padding: 6px; background: #333; color: #fff; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 12px;">
                     ${optionsHTML}
                 </select>
-                <div style="margin-top: 8px; font-size: 11px; color: #88f; text-align: right;">v3.46 활성화됨</div>
+                <div style="margin-top: 8px; font-size: 11px; color: #88f; text-align: right;">v3.49 활성화됨</div>
             </div>
         `;
 
         document.body.appendChild(panel);
+
+        const bossToggleBtn = document.getElementById('boss-hunt-toggle-btn');
+        bossToggleBtn.addEventListener('click', () => {
+            isBossHuntingEnabled = !isBossHuntingEnabled;
+            localStorage.setItem('modak_boss_hunt_enabled', isBossHuntingEnabled);
+            bossToggleBtn.style.background = isBossHuntingEnabled ? '#2e7d32' : '#c62828';
+            bossToggleBtn.innerText = isBossHuntingEnabled ? 'ON (일반 보스 진행)' : 'OFF (마장기만 출동)';
+            console.log(`[보스 설정] 보스 사냥 상태: ${isBossHuntingEnabled ? 'ON' : 'OFF (망국의 마장기만 예외 출동)'}`);
+            bossToggleBtn.blur();
+        });
 
         const selectElem = document.getElementById('hunting-ground-select');
         selectElem.addEventListener('change', (e) => {
@@ -429,7 +446,7 @@
     let pendingBossData = null;
     let isHandlingDeath = false;
     let isReturning = false;
-    const defeatedBosses = new Set(); // 💡 이미 처치된 보스 인덱스 기록
+    const defeatedBosses = new Set();
 
     async function moveToSelectedHuntingGround() {
         console.log(`\n--- [99] 선택된 기본 사냥터 이동 시작: ${selectedHuntingGround} ---`);
@@ -699,13 +716,17 @@
     }
 
     async function executeBossTask(bossIndex, bossName) {
-        // 💡 실행 시점에 이미 처치된 보스라면 즉시 중단
+        // 💡 보스 사냥 OFF 상태인데 1번 마장기가 아니면 일체의 루틴(귀환 포함) 없이 즉시 리턴
+        if (!isBossHuntingEnabled && bossIndex !== 1) {
+            console.log(`  -> [보스 사냥 OFF] '${bossName}' 출동을 완전히 건너뜁니다.`);
+            return;
+        }
+
         if (defeatedBosses.has(bossIndex)) {
-            console.log(`  -> [출동 취소] '${bossName}'(은)는 이미 처치된 보스입니다. 출동을 취소합니다.`);
+            console.log(`  -> [출동 취소] '${bossName}'(은)는 이미 처치된 보스입니다.`);
             if (pendingBossData && pendingBossData.index === bossIndex) {
                 pendingBossData = null;
             }
-            returnToDefaultHuntingGround();
             return;
         }
 
@@ -713,7 +734,7 @@
             if (bossIndex === 1) {
                 console.log(`[우선순위 갱신] 1번 마장기가 예약되었습니다. 기존 예약을 교체합니다.`);
                 pendingBossData = { index: bossIndex, name: bossName };
-            } else if (!pendingBossData && !defeatedBosses.has(bossIndex)) {
+            } else if (isBossHuntingEnabled && !pendingBossData && !defeatedBosses.has(bossIndex)) {
                 console.log(`[보스 예약됨] 현재 다른 작업 진행 중이므로 [${bossIndex}] ${bossName}을(를) 예약합니다.`);
                 pendingBossData = { index: bossIndex, name: bossName };
             }
@@ -737,7 +758,6 @@
                 for (let i = 0; i < route.length; i++) {
                     const step = route[i];
 
-                    // 1번 마장기 긴급 전환 확인
                     if (pendingBossData && pendingBossData.index === 1 && currentBossIndex !== 1) {
                         console.log(`  -> [1번 마장기 긴급 전환] 이동 중단 및 즉시 출동!`);
                         simulateKey('Escape');
@@ -745,7 +765,6 @@
                         break;
                     }
 
-                    // 이동 중 현재 보스가 처치되었는지 실시간 체크
                     if (defeatedBosses.has(currentBossIndex)) {
                         console.log(`  -> [이동 중 취소] 현재 목표 '${bossName}' 처치 확인! 스텝을 즉시 중단합니다.`);
                         simulateKey('Escape');
@@ -820,8 +839,7 @@
                             break;
                         }
                     } else if (step.type === "return_hunting_ground") {
-                        // 💡 예약된 보스가 아직 살아있는지 검사 후 출동
-                        if (pendingBossData && !defeatedBosses.has(pendingBossData.index)) {
+                        if (pendingBossData && !defeatedBosses.has(pendingBossData.index) && (isBossHuntingEnabled || pendingBossData.index === 1)) {
                             console.log(`  -> [예약된 보스 발견] 기본 사냥터 복귀를 생략하고 예약된 보스(${pendingBossData.name})로 즉시 이동합니다!`);
                             let next = pendingBossData;
                             pendingBossData = null;
@@ -845,7 +863,7 @@
                 let targetBossIndex = currentBossIndex;
                 currentBossIndex = -1;
 
-                if (pendingBossData && !defeatedBosses.has(pendingBossData.index)) {
+                if (pendingBossData && !defeatedBosses.has(pendingBossData.index) && (isBossHuntingEnabled || pendingBossData.index === 1)) {
                     let next = pendingBossData;
                     pendingBossData = null;
                     await randomSleep(500, 1000);
@@ -897,7 +915,7 @@
                             isReturning = false;
                             isHandlingDeath = false;
 
-                            if (pendingBossData && !defeatedBosses.has(pendingBossData.index)) {
+                            if (pendingBossData && !defeatedBosses.has(pendingBossData.index) && (isBossHuntingEnabled || pendingBossData.index === 1)) {
                                 let next = pendingBossData;
                                 pendingBossData = null;
                                 await randomSleep(500, 1000);
@@ -950,10 +968,11 @@
         // 1. 보스 출현 감지
         if (msgText.includes("출현")) {
             console.log(`[보스 출현 감지] [${matchedBoss.index}] ${matchedBoss.name}`);
-            defeatedBosses.delete(matchedBoss.index); // 💡 새 출현 시 처치 목록에서 제거
+            defeatedBosses.delete(matchedBoss.index);
 
+            // 👉 1번 마장기는 보스 사냥 ON/OFF 무관하게 즉시 최우선 출동
             if (matchedBoss.index === 1) {
-                console.log("⚡ [긴급] 1번 망국의 마장기 출현! 모든 작업을 제쳐두고 즉시 출동합니다!");
+                console.log("⚡ [긴급] 1번 망국의 마장기 출현! (사냥 옵션 무시 및 즉시 출동)");
                 pendingBossData = { index: matchedBoss.index, name: matchedBoss.name };
                 if (isRunning) {
                     simulateKey('Escape');
@@ -965,6 +984,12 @@
                 return;
             }
 
+            // 💡 [핵심 수정] 보스 사냥 OFF 상태면 사냥터 복귀 루틴도 건드리지 않고 여기서 즉시 완전 차단
+            if (!isBossHuntingEnabled) {
+                console.log(`  -> [보스 사냥 OFF] '${matchedBoss.name}' 출현을 무시하며, 현재 사냥을 계속 유지합니다.`);
+                return;
+            }
+
             setTimeout(() => {
                 executeBossTask(matchedBoss.index, matchedBoss.name);
             }, Math.floor(Math.random() * 500) + 300);
@@ -973,22 +998,21 @@
         // 2. 보스 처치 감지
         if (msgText.includes("처치되었습니다")) {
             console.log(`[보스 처치 감지] '${matchedBoss.name}'(이)가 처치되었습니다.`);
-            defeatedBosses.add(matchedBoss.index); // 💡 처치 완료 보스 등록
+            defeatedBosses.add(matchedBoss.index);
 
-            // 예약된 보스가 잡힌 거라면 예약 취소
             if (pendingBossData && pendingBossData.index === matchedBoss.index) {
                 console.log(`  -> [예약 취소] 예약 목록에 있던 '${matchedBoss.name}'(이)가 처치되어 예약을 비웁니다.`);
                 pendingBossData = null;
             }
 
-            // 만약 현재 추적/수행 중이던 보스가 잡힌 경우
+            // 💡 보스 잡는 중이 아닐 때는 처치 메시지로 인해 사냥터를 이탈하지 않도록 엄격히 가드
             if (isRunning && currentBossIndex === matchedBoss.index) {
                 console.log("  -> [목표 보스 처치 확인] 현재 진행 중인 보스 작업의 잔여 단계를 스킵합니다.");
                 simulateKey('Escape');
                 isRunning = false;
                 currentBossIndex = -1;
 
-                if (pendingBossData && !defeatedBosses.has(pendingBossData.index)) {
+                if (pendingBossData && !defeatedBosses.has(pendingBossData.index) && (isBossHuntingEnabled || pendingBossData.index === 1)) {
                     let next = pendingBossData;
                     pendingBossData = null;
                     setTimeout(() => {
@@ -1012,6 +1036,6 @@
     window.testBoss = executeBossTask;
     window.testHuntingGround = returnToDefaultHuntingGround;
 
-    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.46 가동 완료!");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.49 가동 완료!");
 
 })();
