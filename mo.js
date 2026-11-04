@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.43
+// @name         모닥 온라인 보스 오토봇 v3.46
 // @namespace    http://tampermonkey.net/
-// @version      3.43
+// @version      3.46
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -11,7 +11,6 @@
 (function() {
     'use strict';
 
-    // 브라우저 환경에서 사용할 키보드 시뮬레이터 (keydown -> keypress -> keyup)
     function simulateKey(keyChar, duration = 200) {
         const char = keyChar.toLowerCase();
         const keyCode = char.charCodeAt(0);
@@ -28,7 +27,6 @@
         }, duration);
     }
 
-    // 특정 시간 동안 키를 꾹 누르는 시뮬레이션
     function holdKey(keyChar, durationSec) {
         return new Promise(resolve => {
             const char = keyChar.toLowerCase();
@@ -46,7 +44,6 @@
         });
     }
 
-    // 두 키 동시 누르기 (예: 대각선 이동)
     function holdTwoKeys(keyChars, durationSec) {
         return new Promise(resolve => {
             const chars = [keyChars[0].toLowerCase(), keyChars[1].toLowerCase()];
@@ -69,22 +66,16 @@
         });
     }
 
-    // 일정 시간 대기 헬퍼
-    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-    // 인간적인 난수 슬립 헬퍼 (min ~ max 사이의 랜덤 밀리초 대기)
     const randomSleep = (minMs, maxMs) => {
         const randomTime = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
         return new Promise(resolve => setTimeout(resolve, randomTime));
     };
 
-    // 현재 탈것 버튼을 찾아 반환하는 헬퍼
     function getMountButton() {
         return document.querySelector('.hud-movement-actions button.quick-action-slot[aria-label="탑승"], .hud-movement-actions button.quick-action-slot[aria-label="내리기"]') ||
                document.querySelector('button.quick-action-slot[title*="탑승"], button.quick-action-slot[title*="내리기"]');
     }
 
-    // 현재 탈것에 탑승 중인지 여부를 판별하는 헬퍼
     function isCurrentlyMounted() {
         const btn = getMountButton();
         if (!btn) return false;
@@ -93,7 +84,6 @@
                btn.getAttribute('aria-label') === '내리기';
     }
 
-    // DOM 기반 탈것 판별 및 반복 재시도 함수
     async function ensureMount(maxRetries = 5) {
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             if (isCurrentlyMounted()) {
@@ -129,13 +119,11 @@
         return false;
     }
 
-    // 현재 미니맵 맵 이름 가져오기 함수
     function getCurrentMapName() {
         const mapNameEl = document.getElementsByClassName("panel-list-name")[0];
         return mapNameEl ? mapNameEl.innerText.trim() : "";
     }
 
-    // 특정 맵 이름이 될 때까지 대기하는 함수
     async function waitForMap(expectedName, timeoutSec = 15) {
         console.log(`  -> [맵 검증 대기] '${expectedName}' 진입 대기 중 (최대 ${timeoutSec}초)...`);
         let startTime = Date.now();
@@ -152,7 +140,21 @@
         return false;
     }
 
-    // 사냥터 목록 정의
+    async function waitForWaypointMenu(timeoutMs = 4000) {
+        console.log("  -> [웨이포인트 대기] 목적지 창 렌더링 확인 중...");
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+            const destinations = document.getElementsByClassName("waypoint-destination");
+            if (destinations && destinations.length > 0) {
+                await randomSleep(250, 400);
+                return true;
+            }
+            await randomSleep(150, 250);
+        }
+        console.log("  -> [웨이포인트 대기 시간 초과] 목적지 목록을 찾지 못했습니다.");
+        return false;
+    }
+
     const HUNTING_GROUNDS = [
         { id: "wasteland_1", name: "황야1 (큰거 - 선인장 액기스)", escapeKey: "s", escapeSec: 2.0 },
         { id: "wasteland_2", name: "황야2 (작은거 - 선인장 액기스)", escapeKey: "s", escapeSec: 2.0 },
@@ -175,7 +177,6 @@
         return HUNTING_GROUNDS.find(g => g.id === selectedHuntingGround) || HUNTING_GROUNDS[0];
     }
 
-    // 🖥️ UI 생성 함수 (단축키 씹힘 방지 보완 적용)
     function createSettingsUI() {
         if (document.getElementById('modak-bot-settings-ui')) return;
 
@@ -220,7 +221,7 @@
                 <select id="hunting-ground-select" style="width: 100%; padding: 6px; background: #333; color: #fff; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 12px;">
                     ${optionsHTML}
                 </select>
-                <div style="margin-top: 8px; font-size: 11px; color: #88f; text-align: right;">v3.43 활성화됨</div>
+                <div style="margin-top: 8px; font-size: 11px; color: #88f; text-align: right;">v3.46 활성화됨</div>
             </div>
         `;
 
@@ -295,7 +296,6 @@
         });
     }
 
-    // 보스 목록 정의
     const BOSS_LIST = [
         { index: 0, name: "악몽의 집합체" },
         { index: 1, name: "망국의 마장기" },
@@ -309,7 +309,6 @@
         { index: 9, name: "붉은송곳니 우두머리" }
     ];
 
-    // 보스 이동 경로 정의
     const BOSS_ROUTES = {
         0: [
             { type: "js", script: () => document.getElementsByClassName("waypoint-destination")[2].click(), wait: 3.0 },
@@ -430,13 +429,18 @@
     let pendingBossData = null;
     let isHandlingDeath = false;
     let isReturning = false;
+    const defeatedBosses = new Set(); // 💡 이미 처치된 보스 인덱스 기록
 
-    // 사냥터별 구체적 이동 로직
     async function moveToSelectedHuntingGround() {
         console.log(`\n--- [99] 선택된 기본 사냥터 이동 시작: ${selectedHuntingGround} ---`);
 
-        await returnTownAndClickCampfire(false);
-        await randomSleep(1500, 1873);
+        const returnSuccess = await returnTownAndClickCampfire(false);
+        if (!returnSuccess) {
+            console.log("  -> [중단] 마을 귀환 실패로 기본 사냥터 이동을 취소합니다.");
+            return;
+        }
+
+        await waitForWaypointMenu(4000);
 
         switch (selectedHuntingGround) {
             case "wasteland_1":
@@ -572,11 +576,13 @@
     async function returnToDefaultHuntingGround() {
         if (isReturning) return;
         isReturning = true;
-        await moveToSelectedHuntingGround();
-        isReturning = false;
+        try {
+            await moveToSelectedHuntingGround();
+        } finally {
+            isReturning = false;
+        }
     }
 
-    // 🔍 [DOM 기반] 마을 귀환 버튼 탐색 및 상태 판별 헬퍼
     function getTownPortalButton() {
         return document.querySelector('.hud-movement-actions button.quick-action-slot[aria-label="마을 귀환"], .hud-movement-actions button.quick-action-slot[aria-label="귀환 취소"]');
     }
@@ -587,10 +593,8 @@
         return btn.classList.contains('is-active') || btn.getAttribute('aria-label') === '귀환 취소';
     }
 
-    // 🧠 [스마트 귀환 루틴] DOM 기반 is-active 감시 및 사냥터별 맞춤 회피 적용
     async function smartReturnTown() {
-        let currentMap = getCurrentMapName();
-        if (currentMap === "모닥 마을") {
+        if (getCurrentMapName() === "모닥 마을") {
             return true;
         }
 
@@ -598,7 +602,7 @@
         simulateKey('Escape');
         await randomSleep(250, 400);
         simulateKey('z');
-        await randomSleep(250, 400);
+        await randomSleep(350, 500);
 
         const currentGroundConfig = getCurrentHuntingGroundConfig();
         const escapeKey = currentGroundConfig.escapeKey || 's';
@@ -609,30 +613,31 @@
 
             const portalBtn = getTownPortalButton();
             if (portalBtn && !isTownPortalActive()) {
-                console.log(`  -> [귀환 시도 ${attempt}/10] '마을 귀환' 입력 (B)`);
+                console.log(`  -> [귀환 시도 ${attempt}/10] '마을 귀환' 클릭`);
                 portalBtn.click();
+            } else if (!portalBtn && !isTownPortalActive()) {
                 simulateKey('b');
             }
 
             let castStart = Date.now();
             let isCastingInterrupted = false;
 
-            while (Date.now() - castStart < 3500) {
-                await randomSleep(200, 300);
+            while (Date.now() - castStart < 3600) {
+                await randomSleep(150, 250);
                 if (getCurrentMapName() === "모닥 마을") {
                     console.log("  -> [귀환 완료] 모닥 마을 진입 성공!");
                     return true;
                 }
-                if (!isTownPortalActive() && Date.now() - castStart > 800) {
+                if (!isTownPortalActive() && Date.now() - castStart > 1200) {
                     isCastingInterrupted = true;
                     break;
                 }
             }
 
             if (isCastingInterrupted) {
-                console.log(`  -> [귀환 취소 감지] 피격으로 인해 귀환이 끊겼습니다. 사냥터 맞춤 탈출방향 '${escapeKey.toUpperCase()}' ${escapeSec}초 이동 후 재시도합니다.`);
+                console.log(`  -> [귀환 취소 감지] 피격 발생. '${escapeKey.toUpperCase()}' 방향 ${escapeSec}초 이동 후 재시도`);
                 await holdKey(escapeKey, escapeSec);
-                await randomSleep(600, 1000);
+                await randomSleep(400, 700);
             }
         }
 
@@ -645,12 +650,16 @@
         if (currentMap === "모닥 마을") {
             console.log(`  -> [마을 상태 확인] 현재 위치('${currentMap}')가 이미 '모닥 마을'이므로 귀환을 생략합니다.`);
         } else {
-            await smartReturnTown();
+            const success = await smartReturnTown();
+            if (!success) {
+                console.log("  -> [오류] 마을 귀환 실패로 정비 및 상호작용 단계를 중단합니다.");
+                return false;
+            }
         }
 
-        await randomSleep(800, 1200);
+        await randomSleep(600, 1000);
         simulateKey('Escape');
-        await randomSleep(250, 400);
+        await randomSleep(200, 350);
         
         await ensureMount();
 
@@ -659,20 +668,18 @@
         } else {
             console.log("  -> [캠프파이어 상호작용] 'f' 키 입력");
             simulateKey('f');
-            await randomSleep(800, 1300);
+            await randomSleep(600, 1000);
         }
 
         return true;
     }
 
-    // 전리품 창 체크 루틴
     async function huntBossAndLoot(timeoutSec = 240) {
         simulateKey('z');
         let startTime = Date.now();
         while (Date.now() - startTime < timeoutSec * 1000) {
             await randomSleep(900, 1300);
 
-            // 💡 사냥 중 1번 마장기 예약이 들어오면 즉시 탈출
             if (pendingBossData && pendingBossData.index === 1 && currentBossIndex !== 1) {
                 console.log("  -> [긴급 탈출] 사냥 중 1번 마장기 예약 감지! 즉시 루틴을 중단합니다.");
                 simulateKey('Escape');
@@ -691,14 +698,23 @@
         return false;
     }
 
-    // 보스 수행 메인 함수
     async function executeBossTask(bossIndex, bossName) {
+        // 💡 실행 시점에 이미 처치된 보스라면 즉시 중단
+        if (defeatedBosses.has(bossIndex)) {
+            console.log(`  -> [출동 취소] '${bossName}'(은)는 이미 처치된 보스입니다. 출동을 취소합니다.`);
+            if (pendingBossData && pendingBossData.index === bossIndex) {
+                pendingBossData = null;
+            }
+            returnToDefaultHuntingGround();
+            return;
+        }
+
         if (isRunning || isReturning) {
             if (bossIndex === 1) {
                 console.log(`[우선순위 갱신] 1번 마장기가 예약되었습니다. 기존 예약을 교체합니다.`);
                 pendingBossData = { index: bossIndex, name: bossName };
-            } else if (!pendingBossData) {
-                console.log(`[보스 예약됨] 현재 다른 보스 진행 중이므로 [${bossIndex}] ${bossName}을(를) 예약합니다.`);
+            } else if (!pendingBossData && !defeatedBosses.has(bossIndex)) {
+                console.log(`[보스 예약됨] 현재 다른 작업 진행 중이므로 [${bossIndex}] ${bossName}을(를) 예약합니다.`);
                 pendingBossData = { index: bossIndex, name: bossName };
             }
             return;
@@ -709,15 +725,19 @@
         let routeSuccess = true;
 
         try {
-            if (bossIndex === 4) {
-                await returnTownAndClickCampfire(true);
-            } else {
-                await returnTownAndClickCampfire(false);
+            const townReturned = await returnTownAndClickCampfire(bossIndex === 4);
+            if (!townReturned) {
+                console.log("  -> [중단] 마을 귀환 실패로 보스 출동을 취소하고 재시도 대기로 전환합니다.");
+                routeSuccess = false;
+                return;
             }
 
             const route = BOSS_ROUTES[bossIndex];
             if (route) {
-                for (const step of route) {
+                for (let i = 0; i < route.length; i++) {
+                    const step = route[i];
+
+                    // 1번 마장기 긴급 전환 확인
                     if (pendingBossData && pendingBossData.index === 1 && currentBossIndex !== 1) {
                         console.log(`  -> [1번 마장기 긴급 전환] 이동 중단 및 즉시 출동!`);
                         simulateKey('Escape');
@@ -725,15 +745,37 @@
                         break;
                     }
 
-                    if (isHandlingDeath || isReturning || currentBossIndex === -1) break;
+                    // 이동 중 현재 보스가 처치되었는지 실시간 체크
+                    if (defeatedBosses.has(currentBossIndex)) {
+                        console.log(`  -> [이동 중 취소] 현재 목표 '${bossName}' 처치 확인! 스텝을 즉시 중단합니다.`);
+                        simulateKey('Escape');
+                        routeSuccess = false;
+                        break;
+                    }
+
+                    if (isHandlingDeath || currentBossIndex === -1) break;
 
                     if (step.type === "js") {
+                        if (i === 0 && bossIndex !== 4) {
+                            const opened = await waitForWaypointMenu(4000);
+                            if (!opened) {
+                                console.log("  -> [오류] 웨이포인트 창을 열지 못해 캠프파이어(f) 재입력 시도");
+                                simulateKey('f');
+                                await waitForWaypointMenu(3000);
+                            }
+                        }
+
                         try {
-                            await randomSleep(600, 1000);
                             let success = false;
                             let startAttempt = Date.now();
                             while (Date.now() - startAttempt < 3000) {
-                                try { step.script(); success = true; break; } catch (err) { await randomSleep(150, 300); }
+                                try { 
+                                    step.script(); 
+                                    success = true; 
+                                    break; 
+                                } catch (err) { 
+                                    await randomSleep(150, 300); 
+                                }
                             }
                         } catch(e) {}
                         await randomSleep((step.wait * 1000) - 200, (step.wait * 1000) + 400);
@@ -778,8 +820,8 @@
                             break;
                         }
                     } else if (step.type === "return_hunting_ground") {
-                        // 💡 사냥 완료 후 복귀 직전, 예약된 보스가 있으면 곧바로 그 보스로 출동!
-                        if (pendingBossData) {
+                        // 💡 예약된 보스가 아직 살아있는지 검사 후 출동
+                        if (pendingBossData && !defeatedBosses.has(pendingBossData.index)) {
                             console.log(`  -> [예약된 보스 발견] 기본 사냥터 복귀를 생략하고 예약된 보스(${pendingBossData.name})로 즉시 이동합니다!`);
                             let next = pendingBossData;
                             pendingBossData = null;
@@ -789,6 +831,7 @@
                             executeBossTask(next.index, next.name);
                             return;
                         }
+                        pendingBossData = null;
                         await returnToDefaultHuntingGround();
                     }
                 }
@@ -796,22 +839,22 @@
         } catch (err) {
             routeSuccess = false;
         } finally {
-            if (!isHandlingDeath && !isReturning) {
+            if (!isHandlingDeath) {
                 let wasRunning = isRunning;
                 isRunning = false;
                 let targetBossIndex = currentBossIndex;
                 currentBossIndex = -1;
 
-                // 💡 세션 종료 직전 예약된 보스가 있다면 곧바로 다음 보스로 출동!
-                if (pendingBossData) {
+                if (pendingBossData && !defeatedBosses.has(pendingBossData.index)) {
                     let next = pendingBossData;
                     pendingBossData = null;
                     await randomSleep(500, 1000);
                     executeBossTask(next.index, next.name);
                     return;
                 }
+                pendingBossData = null;
 
-                if (!routeSuccess && wasRunning && targetBossIndex !== -1) {
+                if (!routeSuccess && wasRunning && targetBossIndex !== -1 && !defeatedBosses.has(targetBossIndex)) {
                     await randomSleep(800, 1500);
                     executeBossTask(bossIndex, bossName);
                     return;
@@ -820,7 +863,6 @@
         }
     }
 
-    // 사망 패널 감지
     function checkAndHandleDeath() {
         if (isHandlingDeath || isReturning) return;
 
@@ -855,12 +897,13 @@
                             isReturning = false;
                             isHandlingDeath = false;
 
-                            if (pendingBossData) {
+                            if (pendingBossData && !defeatedBosses.has(pendingBossData.index)) {
                                 let next = pendingBossData;
                                 pendingBossData = null;
                                 await randomSleep(500, 1000);
                                 executeBossTask(next.index, next.name);
                             } else {
+                                pendingBossData = null;
                                 await returnToDefaultHuntingGround();
                             }
                         }, 1500);
@@ -907,8 +950,8 @@
         // 1. 보스 출현 감지
         if (msgText.includes("출현")) {
             console.log(`[보스 출현 감지] [${matchedBoss.index}] ${matchedBoss.name}`);
+            defeatedBosses.delete(matchedBoss.index); // 💡 새 출현 시 처치 목록에서 제거
 
-            // 👉 1번 마장기인 경우 현재 무엇을 하든 즉시 최우선 개입
             if (matchedBoss.index === 1) {
                 console.log("⚡ [긴급] 1번 망국의 마장기 출현! 모든 작업을 제쳐두고 즉시 출동합니다!");
                 pendingBossData = { index: matchedBoss.index, name: matchedBoss.name };
@@ -930,6 +973,13 @@
         // 2. 보스 처치 감지
         if (msgText.includes("처치되었습니다")) {
             console.log(`[보스 처치 감지] '${matchedBoss.name}'(이)가 처치되었습니다.`);
+            defeatedBosses.add(matchedBoss.index); // 💡 처치 완료 보스 등록
+
+            // 예약된 보스가 잡힌 거라면 예약 취소
+            if (pendingBossData && pendingBossData.index === matchedBoss.index) {
+                console.log(`  -> [예약 취소] 예약 목록에 있던 '${matchedBoss.name}'(이)가 처치되어 예약을 비웁니다.`);
+                pendingBossData = null;
+            }
 
             // 만약 현재 추적/수행 중이던 보스가 잡힌 경우
             if (isRunning && currentBossIndex === matchedBoss.index) {
@@ -938,8 +988,7 @@
                 isRunning = false;
                 currentBossIndex = -1;
 
-                // 예약된 다음 보스가 있다면 곧바로 그 보스로 출발!
-                if (pendingBossData) {
+                if (pendingBossData && !defeatedBosses.has(pendingBossData.index)) {
                     let next = pendingBossData;
                     pendingBossData = null;
                     setTimeout(() => {
@@ -948,6 +997,7 @@
                     return;
                 }
 
+                pendingBossData = null;
                 returnToDefaultHuntingGround();
                 return;
             }
@@ -962,6 +1012,6 @@
     window.testBoss = executeBossTask;
     window.testHuntingGround = returnToDefaultHuntingGround;
 
-    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.43 가동 완료!");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.46 가동 완료!");
 
 })();
