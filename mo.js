@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.65
+// @name         모닥 온라인 보스 오토봇 v3.66
 // @namespace    http://tampermonkey.net/
-// @version      3.65
+// @version      3.66
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -79,7 +79,7 @@
         return new Promise(resolve => setTimeout(resolve, randomTime));
     };
 
-    // 💡 콘솔 활성화 시에도 포커스 유실 없이 강제 마우스 클릭 이벤트 전달
+    // 💡 콘솔 활성화 상태에서도 포커스 유실 없이 강제 마우스 클릭 이벤트 전달
     function forceClickElement(el) {
         if (!el) return;
         try {
@@ -96,7 +96,7 @@
         }
     }
 
-    // 💡 자동 사냥 상태 검증 및 안전 제어[cite: 13, 14]
+    // 💡 자동 사냥 상태 검증 및 안전 제어
     function getAutoHuntButton() {
         return document.querySelector('button.quick-action-slot[aria-label="자동 사냥"]');
     }
@@ -148,7 +148,6 @@
                 return true;
             }
 
-            // 혹시 전리품 창이 열려있어서 탑승이 안 되는 경우 대비
             if (document.querySelector('section.loot-panel')) {
                 await ensureLootPanelClosed(2000);
             }
@@ -234,7 +233,7 @@
         return false;
     }
 
-    // 💡 전리품 창(section.loot-panel) 닫기 검증[cite: 8, 12]
+    // 💡 전리품 창(section.loot-panel) 닫기 검증
     async function ensureLootPanelClosed(timeoutMs = 4000) {
         const start = Date.now();
         while (Date.now() - start < timeoutMs) {
@@ -259,7 +258,7 @@
         return false;
     }
 
-    // 💡 상점 창(section.shop-panel) 닫기 검증[cite: 10, 11]
+    // 💡 상점 창(section.shop-panel) 닫기 검증
     async function ensureShopPanelClosed(timeoutMs = 5000) {
         const start = Date.now();
         while (Date.now() - start < timeoutMs) {
@@ -444,7 +443,7 @@
             console.log("  -> [경고] '선택 판매' 버튼이 활성화되지 않아 판매를 진행하지 못했습니다.");
         }
 
-        // 6. 상점 창 닫기[cite: 11]
+        // 6. 상점 창 닫기
         console.log("  -> [상점 종료] 상점 창 닫기 검증 시작...");
         await ensureShopPanelClosed(5000);
         await randomSleep(500, 800);
@@ -535,7 +534,7 @@
                 <select id="hunting-ground-select" style="width: 100%; padding: 6px; background: #333; color: #fff; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 12px;">
                     ${optionsHTML}
                 </select>
-                <div style="margin-top: 8px; font-size: 11px; color: #88f; text-align: right;">v3.65 활성화됨</div>
+                <div style="margin-top: 8px; font-size: 11px; color: #88f; text-align: right;">v3.66 활성화됨</div>
             </div>
         `;
 
@@ -964,7 +963,6 @@
         }
 
         console.log("  -> [스마트 귀환 시작] 전리품 창 확인 및 자동 사냥 종료 후 귀환 시도");
-        // 💡 귀환 직전 전리품 창이 열려있다면 확실하게 닫기
         await ensureLootPanelClosed(3000);
         simulateKey('Escape');
         await randomSleep(250, 400);
@@ -978,7 +976,6 @@
         for (let attempt = 1; attempt <= 10; attempt++) {
             if (getCurrentMapName() === "모닥 마을") return true;
 
-            // 💡 귀환 시도 중 뒤늦게 전리품 창이 떴을 경우 닫기
             if (document.querySelector('section.loot-panel')) {
                 await ensureLootPanelClosed(2500);
                 await randomSleep(200, 350);
@@ -1018,6 +1015,7 @@
         return false;
     }
 
+    // 💡 [핵심] 마을 귀환 시마다 부활 복구 루틴(S 6.5s ➔ W 3.6s)을 실행하여 벽에 오차 상쇄 후 모닥불 정렬[cite: 8]
     async function returnTownAndClickCampfire(skipCampfire = false) {
         let currentMap = getCurrentMapName();
         if (currentMap === "모닥 마을") {
@@ -1031,7 +1029,6 @@
         }
 
         await randomSleep(600, 1000);
-        // 💡 마을 도착 후에도 혹시 전리품 창이 남아있으면 확실히 닫기
         if (document.querySelector('section.loot-panel')) {
             await ensureLootPanelClosed(3000);
         }
@@ -1039,6 +1036,12 @@
         await randomSleep(200, 350);
         
         await ensureMount();
+
+        // 💡 랜덤 스폰 보정: 부활 복구와 동일하게 아래쪽 벽으로 비빈 뒤 캠프파이어로 진입[cite: 8]
+        console.log("  -> [마을 정렬 이동] 랜덤 스폰 오차 상쇄: S 6.5초 ➔ W 3.6초");
+        await holdKey('s', 6.5);
+        await holdKey('w', 3.6);
+        await randomSleep(400, 700);
 
         if (skipCampfire) {
             console.log("  -> [캠프파이어 생략] 상점 방문 또는 점액군주용으로 상호작용 생략");
@@ -1051,7 +1054,7 @@
         return true;
     }
 
-    // 💡 [핵심 개선] 보스 처치 메시지가 먼저 떠도 전리품 창 렌더링을 기다렸다가 닫고 종료[cite: 8, 12]
+    // 💡 보스 처치 메시지가 먼저 떠도 전리품 창 렌더링을 기다렸다가 닫고 종료[cite: 8]
     async function huntBossAndLoot(timeoutSec = 240) {
         await setAutoHunting(true);
         let startTime = Date.now();
@@ -1064,7 +1067,7 @@
                 return "dead";
             }
 
-            // 1. 전리품 창이 화면에 떴는지 최우선으로 확인!
+            // 1. 전리품 창 최우선 확인
             const lootPanel = document.querySelector('section.loot-panel');
             const closeBtn = document.querySelector('button[aria-label="전리품 닫기"]');
             if (lootPanel || closeBtn) {
@@ -1075,14 +1078,14 @@
                 return true;
             }
 
-            // 2. 긴급 1번 마장기 스위치 체크
+            // 2. 긴급 1번 마장기 출현 확인
             if (bossQueue.length > 0 && bossQueue[0].index === 1 && currentBossIndex !== 1) {
                 console.log("  -> [긴급 탈출] 사냥 중 1번 마장기 출현 감지! 즉시 루틴을 중단합니다.");
                 await ensureLootPanelClosed(2000);
                 return "urgent_switch";
             }
 
-            // 3. 채팅으로 보스 처치가 감지된 경우: 즉시 나가지 않고 전리품 창이 뜰 때까지 최대 3.5초 대기!
+            // 3. 처치 감지 시 최대 3.5초간 전리품 창 대기
             if (defeatedBosses.has(currentBossIndex)) {
                 if (!bossDefeatedTime) {
                     bossDefeatedTime = Date.now();
@@ -1153,7 +1156,6 @@
                                 break;
                             }
 
-                            // 이동 단계에서만 보스 처치 시 조기 중단 (hunt_boss 단계는 자체적으로 전리품 대기 후 종료함)
                             if (step.type !== "hunt_boss" && step.type !== "return_hunting_ground" && defeatedBosses.has(currentBossIndex)) {
                                 console.log(`  -> [이동 중 취소] 현재 목표 '${bossName}' 처치 확인! 이동을 중단합니다.`);
                                 simulateKey('Escape');
@@ -1395,7 +1397,7 @@
         }
     }
 
-    // 💡 기본 사냥 중 백그라운드 전리품 자동 수거 루틴[cite: 12]
+    // 💡 기본 사냥 중 백그라운드 전리품 자동 수거 루틴
     let isAutoHandlingLoot = false;
     async function checkAndHandleBackgroundLoot() {
         if (isAutoHandlingLoot || isRunning || isReturning || isHandlingDeath) return;
@@ -1498,6 +1500,6 @@
     window.testShop = visitShopAndSellItems;
     window.testAutoHunt = setAutoHunting;
 
-    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.65 가동 완료!");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.66 가동 완료!");
 
 })();
