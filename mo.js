@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.66
+// @name         모닥 온라인 보스 오토봇 v3.67
 // @namespace    http://tampermonkey.net/
-// @version      3.66
+// @version      3.67
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -79,7 +79,6 @@
         return new Promise(resolve => setTimeout(resolve, randomTime));
     };
 
-    // 💡 콘솔 활성화 상태에서도 포커스 유실 없이 강제 마우스 클릭 이벤트 전달
     function forceClickElement(el) {
         if (!el) return;
         try {
@@ -96,7 +95,6 @@
         }
     }
 
-    // 💡 자동 사냥 상태 검증 및 안전 제어
     function getAutoHuntButton() {
         return document.querySelector('button.quick-action-slot[aria-label="자동 사냥"]');
     }
@@ -233,7 +231,6 @@
         return false;
     }
 
-    // 💡 전리품 창(section.loot-panel) 닫기 검증
     async function ensureLootPanelClosed(timeoutMs = 4000) {
         const start = Date.now();
         while (Date.now() - start < timeoutMs) {
@@ -258,7 +255,6 @@
         return false;
     }
 
-    // 💡 상점 창(section.shop-panel) 닫기 검증
     async function ensureShopPanelClosed(timeoutMs = 5000) {
         const start = Date.now();
         while (Date.now() - start < timeoutMs) {
@@ -283,7 +279,6 @@
         return false;
     }
 
-    // 💡 인벤토리 용량 확인
     async function checkInventorySlotCount() {
         console.log("🎒 [가방 검사] 'i' 키를 눌러 인벤토리 용량을 확인합니다...");
         await ensureLootPanelClosed(2000);
@@ -327,13 +322,11 @@
         return count;
     }
 
-    // 💡 상점 방문 및 아이템 판매 루틴[cite: 1, 2, 3, 4, 5]
     async function visitShopAndSellItems() {
         console.log("\n🏪 [상점 방문 시작] 가방 정리(판매)를 위해 상점 NPC로 이동합니다.");
         
         await ensureMount();
         
-        // 1. 상점 이동 (A ➔ W ➔ F)
         await holdKey('a', SHOP_CONFIG.toShopA);
         await randomSleep(300, 500);
         await holdKey('w', SHOP_CONFIG.toShopW);
@@ -343,7 +336,6 @@
         simulateKey('f');
         await randomSleep(1200, 1600);
 
-        // 2. 판매 탭 찾기 및 클릭[cite: 1]
         let sellTabBtn = null;
         const tabStart = Date.now();
         while (Date.now() - tabStart < 3000) {
@@ -366,7 +358,6 @@
             console.log("  -> [경고] 판매 탭 버튼을 찾지 못했습니다.");
         }
 
-        // 3. 등급 필터 클릭[cite: 2, 5]
         const gradeNames = ["노멀", "매직", "레어"];
         let clickedCount = 0;
         const shopButtons = Array.from(document.querySelectorAll('button[type="button"]'));
@@ -400,7 +391,6 @@
             return;
         }
 
-        // 4. '선택 판매' 버튼 활성화 대기 및 클릭[cite: 3]
         console.log("  -> [3번 대기] '선택 판매' 버튼 활성화 확인 중...");
         let selectSellBtn = null;
         const selectStart = Date.now();
@@ -420,7 +410,6 @@
             forceClickElement(selectSellBtn);
             await randomSleep(1000, 1400);
 
-            // 5. 최종 '판매하기' 버튼 확인 및 클릭[cite: 4]
             console.log("  -> [4번 대기] '판매하기' 확인 버튼 확인 중...");
             let confirmBtn = null;
             const confirmStart = Date.now();
@@ -443,12 +432,10 @@
             console.log("  -> [경고] '선택 판매' 버튼이 활성화되지 않아 판매를 진행하지 못했습니다.");
         }
 
-        // 6. 상점 창 닫기
         console.log("  -> [상점 종료] 상점 창 닫기 검증 시작...");
         await ensureShopPanelClosed(5000);
         await randomSleep(500, 800);
 
-        // 7. 캠프파이어 복귀: S ➔ D ➔ F
         console.log("  -> [캠프파이어 복귀 이동] S ➔ D 이동");
         await holdKey('s', SHOP_CONFIG.toCampS);
         await randomSleep(300, 500);
@@ -477,6 +464,8 @@
 
     let selectedHuntingGround = localStorage.getItem('modak_default_ground') || "wasteland_1";
     let isBossHuntingEnabled = localStorage.getItem('modak_boss_hunt_enabled') !== 'false';
+    // 💡 [신규] 상점 방문 자동화 ON/OFF 상태 (기본값: ON)
+    let isShopSellEnabled = localStorage.getItem('modak_shop_sell_enabled') !== 'false';
     let savedPosX = localStorage.getItem('modak_ui_pos_x');
     let savedPosY = localStorage.getItem('modak_ui_pos_y');
 
@@ -525,16 +514,22 @@
                 </div>
             </div>
             <div id="bot-ui-content" style="padding: 12px 15px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.1);">
                     <span style="font-size: 12px; font-weight: bold;">보스 자동 사냥:</span>
-                    <button id="boss-hunt-toggle-btn" style="padding: 4px 12px; font-size: 11px; font-weight: bold; border-radius: 4px; border: none; cursor: pointer; background: ${isBossHuntingEnabled ? '#2e7d32' : '#c62828'}; color: #fff;">
+                    <button id="boss-hunt-toggle-btn" style="padding: 4px 10px; font-size: 11px; font-weight: bold; border-radius: 4px; border: none; cursor: pointer; background: ${isBossHuntingEnabled ? '#2e7d32' : '#c62828'}; color: #fff;">
                         ${isBossHuntingEnabled ? 'ON (일반 보스 진행)' : 'OFF (마장기만 출동)'}
+                    </button>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                    <span style="font-size: 12px; font-weight: bold;">상점 자동 판매:</span>
+                    <button id="shop-sell-toggle-btn" style="padding: 4px 10px; font-size: 11px; font-weight: bold; border-radius: 4px; border: none; cursor: pointer; background: ${isShopSellEnabled ? '#2e7d32' : '#c62828'}; color: #fff;">
+                        ${isShopSellEnabled ? 'ON (50칸 이상 판매)' : 'OFF (판매 안 함)'}
                     </button>
                 </div>
                 <select id="hunting-ground-select" style="width: 100%; padding: 6px; background: #333; color: #fff; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 12px;">
                     ${optionsHTML}
                 </select>
-                <div style="margin-top: 8px; font-size: 11px; color: #88f; text-align: right;">v3.66 활성화됨</div>
+                <div style="margin-top: 8px; font-size: 11px; color: #88f; text-align: right;">v3.67 활성화됨</div>
             </div>
         `;
 
@@ -548,6 +543,17 @@
             bossToggleBtn.innerText = isBossHuntingEnabled ? 'ON (일반 보스 진행)' : 'OFF (마장기만 출동)';
             console.log(`[보스 설정] 보스 사냥 상태: ${isBossHuntingEnabled ? 'ON' : 'OFF (망국의 마장기만 예외 출동)'}`);
             bossToggleBtn.blur();
+        });
+
+        // 💡 [신규] 상점 방문 토글 버튼 이벤트
+        const shopToggleBtn = document.getElementById('shop-sell-toggle-btn');
+        shopToggleBtn.addEventListener('click', () => {
+            isShopSellEnabled = !isShopSellEnabled;
+            localStorage.setItem('modak_shop_sell_enabled', isShopSellEnabled);
+            shopToggleBtn.style.background = isShopSellEnabled ? '#2e7d32' : '#c62828';
+            shopToggleBtn.innerText = isShopSellEnabled ? 'ON (50칸 이상 판매)' : 'OFF (판매 안 함)';
+            console.log(`[상점 설정] 상점 자동 판매 상태: ${isShopSellEnabled ? 'ON' : 'OFF'}`);
+            shopToggleBtn.blur();
         });
 
         const selectElem = document.getElementById('hunting-ground-select');
@@ -758,20 +764,25 @@
     async function moveToSelectedHuntingGround() {
         console.log(`\n--- [99] 선택된 기본 사냥터 이동 시작: ${selectedHuntingGround} ---`);
 
-        const returnSuccess = await returnTownAndClickCampfire(true);
+        // 상점 자동 판매가 켜져 있을 때만 점검 및 분기 처리
+        const returnSuccess = await returnTownAndClickCampfire(isShopSellEnabled);
         if (!returnSuccess) {
             console.log("  -> [중단] 마을 귀환 실패로 기본 사냥터 이동을 취소합니다.");
             return;
         }
 
-        const slotCount = await checkInventorySlotCount();
-        if (slotCount >= 50) {
-            console.log(`🚨 [가방 정리 필요] 사용 슬롯이 ${slotCount}개(>=50)입니다. 상점으로 이동합니다.`);
-            await visitShopAndSellItems();
+        if (isShopSellEnabled) {
+            const slotCount = await checkInventorySlotCount();
+            if (slotCount >= 50) {
+                console.log(`🚨 [가방 정리 필요] 사용 슬롯이 ${slotCount}개(>=50)입니다. 상점으로 이동합니다.`);
+                await visitShopAndSellItems();
+            } else {
+                console.log(`✅ [가방 여유] 사용 슬롯(${slotCount}개)이 50개 미만이므로 캠프파이어로 바로 상호작용합니다.`);
+                simulateKey('f');
+                await randomSleep(600, 1000);
+            }
         } else {
-            console.log(`✅ [가방 여유] 사용 슬롯(${slotCount}개)이 50개 미만이므로 캠프파이어로 바로 상호작용합니다.`);
-            simulateKey('f');
-            await randomSleep(600, 1000);
+            console.log("ℹ️ [상점 판매 OFF] 상점 검사를 건너뛰고 기본 사냥터 웨이포인트로 바로 진입합니다.");
         }
 
         const menuReady = await waitForWaypointMenu(4000);
@@ -1015,7 +1026,6 @@
         return false;
     }
 
-    // 💡 [핵심] 마을 귀환 시마다 부활 복구 루틴(S 6.5s ➔ W 3.6s)을 실행하여 벽에 오차 상쇄 후 모닥불 정렬[cite: 8]
     async function returnTownAndClickCampfire(skipCampfire = false) {
         let currentMap = getCurrentMapName();
         if (currentMap === "모닥 마을") {
@@ -1037,7 +1047,6 @@
         
         await ensureMount();
 
-        // 💡 랜덤 스폰 보정: 부활 복구와 동일하게 아래쪽 벽으로 비빈 뒤 캠프파이어로 진입[cite: 8]
         console.log("  -> [마을 정렬 이동] 랜덤 스폰 오차 상쇄: S 6.5초 ➔ W 3.6초");
         await holdKey('s', 6.5);
         await holdKey('w', 3.6);
@@ -1054,7 +1063,6 @@
         return true;
     }
 
-    // 💡 보스 처치 메시지가 먼저 떠도 전리품 창 렌더링을 기다렸다가 닫고 종료[cite: 8]
     async function huntBossAndLoot(timeoutSec = 240) {
         await setAutoHunting(true);
         let startTime = Date.now();
@@ -1067,7 +1075,6 @@
                 return "dead";
             }
 
-            // 1. 전리품 창 최우선 확인
             const lootPanel = document.querySelector('section.loot-panel');
             const closeBtn = document.querySelector('button[aria-label="전리품 닫기"]');
             if (lootPanel || closeBtn) {
@@ -1078,14 +1085,12 @@
                 return true;
             }
 
-            // 2. 긴급 1번 마장기 출현 확인
             if (bossQueue.length > 0 && bossQueue[0].index === 1 && currentBossIndex !== 1) {
                 console.log("  -> [긴급 탈출] 사냥 중 1번 마장기 출현 감지! 즉시 루틴을 중단합니다.");
                 await ensureLootPanelClosed(2000);
                 return "urgent_switch";
             }
 
-            // 3. 처치 감지 시 최대 3.5초간 전리품 창 대기
             if (defeatedBosses.has(currentBossIndex)) {
                 if (!bossDefeatedTime) {
                     bossDefeatedTime = Date.now();
@@ -1397,7 +1402,6 @@
         }
     }
 
-    // 💡 기본 사냥 중 백그라운드 전리품 자동 수거 루틴
     let isAutoHandlingLoot = false;
     async function checkAndHandleBackgroundLoot() {
         if (isAutoHandlingLoot || isRunning || isReturning || isHandlingDeath) return;
@@ -1455,7 +1459,6 @@
         const matchedBoss = BOSS_LIST.find(b => msgText.includes(b.name));
         if (!matchedBoss) return;
 
-        // 1. 보스 출현 감지
         if (msgText.includes("출현")) {
             console.log(`[보스 출현 감지] [${matchedBoss.index}] ${matchedBoss.name}`);
             defeatedBosses.delete(matchedBoss.index);
@@ -1476,7 +1479,6 @@
             }, Math.floor(Math.random() * 500) + 300);
         }
 
-        // 2. 보스 처치 감지
         if (msgText.includes("처치되었습니다")) {
             console.log(`[보스 처치 감지] '${matchedBoss.name}'(이)가 처치되었습니다.`);
             defeatedBosses.add(matchedBoss.index);
@@ -1500,6 +1502,6 @@
     window.testShop = visitShopAndSellItems;
     window.testAutoHunt = setAutoHunting;
 
-    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.66 가동 완료!");
+    console.log("모닥 온라인 단독 오토봇 헬퍼 v3.67 가동 완료!");
 
 })();
