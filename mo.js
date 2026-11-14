@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.84 (Smooth Inertia Glide & Smart Routing)
+// @name         모닥 온라인 보스 오토봇 v3.85 (Priority Boss: 숲길의 두 사슴 & Portal Retry)
 // @namespace    http://tampermonkey.net/
-// @version      3.84
+// @version      3.85
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -33,8 +33,12 @@
         6: { map: "그늘숲", x: -5.14, y: 323.57, name: "스컬 워로드" },
         7: { map: "협곡 진입로", x: -30.19, y: 399.00, name: "뼈바람 포식자" },
         8: { map: "수호자의 안식처", x: 37.21, y: 558.92, name: "뒤틀린 태초목" },
-        9: { map: "붉은숲 피난처", x: -72.18, y: 616.09, name: "붉은송곳니 우두머리" }
+        9: { map: "붉은숲 피난처", x: -72.18, y: 616.09, name: "붉은송곳니 우두머리" },
+        10: { map: "고요한 숲길", x: 133.08, y: 683.38, name: "숲길의 두 사슴" }
     };
+
+    // 💡 [최우선 긴급 출동 보스 목록] (1: 망국의 마장기, 10: 숲길의 두 사슴)
+    const PRIORITY_BOSSES = new Set([1, 10]);
 
     // 💡 [기본 사냥터 실측 위치]
     const HUNTING_GROUNDS = [
@@ -85,7 +89,7 @@
             { to: "잊혀진 고성 중앙부", portal: { x: 687.38, y: 74.65 } }
         ],
         "뼈바람 협곡": [
-            { to: "협곡 진입로", portal: { x: 5.50, y: 432.67 } }
+            { to: "협곡 진입로", portal: { x: 3.94, y: 433.45 } } // 💡 실측 기반 갱신 완료
         ],
         "협곡 진입로": [
             { to: "뼈바람 협곡", portal: { x: -11.66, y: 424.02 } },
@@ -100,6 +104,10 @@
         ],
         "수호자의 안식처": [
             { to: "붉은숲 피난처", portal: { x: 70.13, y: 584.31 } }
+        ],
+
+        "고요한 숲길": [
+            { to: "붉은숲 피난처", portal: { x: 50.61, y: 670.04 } }
         ]
     };
 
@@ -171,7 +179,7 @@
         }
     }
 
-    // 💡 [자연스러운 주행] 연속 글라이딩 + 관성 예측 조기 브레이크 엔진
+    // 💡 연속 글라이딩 + 관성 예측 조기 브레이크 엔진
     async function glideToTarget(targetX, targetY, radiusX = 3.5, radiusY = 2.8, maxTimeoutSec = 20) {
         console.log(`🧭 [글라이딩] (${targetX.toFixed(2)}, ${targetY.toFixed(2)}) 이동 시작`);
         const startTime = Date.now();
@@ -201,11 +209,9 @@
                 const cur = getCoords();
                 if (!cur) { await sleep(45); continue; }
 
-                // 현재 프레임 이동 속도(관성) 계산
                 const velX = prevPos ? (cur.x - prevPos.x) : 0;
                 const velY = prevPos ? (cur.y - prevPos.y) : 0;
 
-                // 키를 뗐을 때 관성으로 더 미끄러질 예상 위치
                 const predictedX = cur.x + velX * 1.2;
                 const predictedY = cur.y + velY * 1.2;
 
@@ -221,7 +227,7 @@
                     return true;
                 }
 
-                // 2. 관성 예측 위치가 이미 목표 반경 안이라면 미리 키를 떼고 자연스럽게 감속
+                // 2. 관성 예측 위치가 목표 반경 안이면 미리 키를 떼고 자연스럽게 감속
                 if (Math.abs(targetX - predictedX) <= radiusX && Math.abs(targetY - predictedY) <= radiusY && activeKeys.size > 0) {
                     stopAll();
                     await sleep(120);
@@ -229,7 +235,7 @@
                     continue;
                 }
 
-                // 3. 완전히 멈춰 있는 상태에서 목표 바로 코앞(4.5 이내)만 남았을 때 부드러운 단발 보정
+                // 3. 완전히 멈춘 상태에서 코앞(4.5 이내) 미세 보정
                 if (absX <= 4.5 && absY <= 4.5 && Math.hypot(velX, velY) < 0.15) {
                     const nudgeKeys = [];
                     if (diffX > radiusX) nudgeKeys.push('d');
@@ -266,7 +272,7 @@
                     }
                 }
 
-                // 5. 기본 연속 주행 (목표 축 도달 시 해당 축 키만 개별 해제)
+                // 5. 기본 연속 주행
                 const desired = [];
                 if (diffX > radiusX) desired.push('d');
                 else if (diffX < -radiusX) desired.push('a');
@@ -361,7 +367,7 @@
         await ensureMount();
 
         for (let attempt = 1; attempt <= 3; attempt++) {
-            await glideToTarget(camp.x, camp.y, 2.8, 2.2, 12);
+            await glideToTarget(camp.x, camp.y, 2.5, 2.0, 12);
             await sleep(120);
 
             simulateKey('f');
@@ -407,19 +413,46 @@
         return null;
     }
 
-    // 💡 포탈 단계 수행 헬퍼
+    // 💡 [강화] 포탈 중심 정밀 접근(2.0 이내) + 맵 전환 확인 시까지 단계별 재시도
     async function traversePortalStep(step) {
         await ensureMount();
+
         if (step.waypoints) {
             for (const wp of step.waypoints) {
-                await glideToTarget(wp.x, wp.y, 3.0, 2.5, 15);
+                await glideToTarget(wp.x, wp.y, 2.8, 2.3, 15);
             }
         }
-        await glideToTarget(step.portal.x, step.portal.y, 3.5, 2.8, 18);
-        simulateKey('f');
-        await sleep(150);
-        simulateKey('f');
-        return await waitForMap(step.to, 15);
+
+        await glideToTarget(step.portal.x, step.portal.y, 2.0, 1.8, 18);
+        await sleep(120);
+
+        for (let attempt = 1; attempt <= 4; attempt++) {
+            if (getCurrentMapName().includes(step.to)) {
+                await randomSleep(350, 550);
+                return true;
+            }
+
+            if (document.querySelector('section.loot-panel')) {
+                await ensureLootPanelClosed(1000);
+            }
+
+            simulateKey('f', 120);
+
+            const waitStart = Date.now();
+            while (Date.now() - waitStart < 1800) {
+                if (getCurrentMapName().includes(step.to)) {
+                    await randomSleep(350, 550);
+                    return true;
+                }
+                await sleep(150);
+            }
+
+            console.log(`  -> [포탈 재시도 ${attempt}/4] '${step.to}' 포탈 정중앙 재접근 중...`);
+            await glideToTarget(step.portal.x, step.portal.y, 1.3, 1.3, 5);
+            await sleep(100);
+        }
+
+        return false;
     }
 
     // 💡 [핵심 라우터] 이동 시작 시 자동 전투를 먼저 끄고 최단 경로로 이동
@@ -616,7 +649,7 @@
         console.log("\n🏪 [상점 방문] 가까운 캠프파이어를 이용해 모닥 마을 상점으로 이동합니다.");
         await navigateToMap("모닥 마을");
         await ensureMount();
-        await glideToTarget(TOWN_SHOP.x, TOWN_SHOP.y, 2.8, 2.2, 8.0);
+        await glideToTarget(TOWN_SHOP.x, TOWN_SHOP.y, 2.5, 2.0, 8.0);
         await sleep(200);
 
         simulateKey('f');
@@ -667,7 +700,7 @@
                 forceClickElement(selectSellBtn);
                 await randomSleep(800, 1200);
 
-                const confirmBtn = document.querySelector('button.is-danger') || 
+                const confirmBtn = document.querySelector('button.is-danger') ||
                                    Array.from(document.querySelectorAll('button')).find(b => b.innerText.trim() === "판매하기");
                 if (confirmBtn) {
                     forceClickElement(confirmBtn);
@@ -808,8 +841,9 @@
                 return true;
             }
 
-            if (bossQueue.length > 0 && bossQueue[0].index === 1 && currentBossIndex !== 1) {
-                console.log("  -> [긴급 탈출] 1번 마장기 출현으로 현재 보스 취소");
+            // 💡 최우선 긴급 보스(1: 마장기, 10: 두 사슴) 대기열 최상단 진입 시 현재 일반 보스 즉시 중단
+            if (bossQueue.length > 0 && PRIORITY_BOSSES.has(bossQueue[0].index) && !PRIORITY_BOSSES.has(currentBossIndex)) {
+                console.log(`  -> [긴급 탈출] 최우선 보스(${bossQueue[0].name}) 출현으로 현재 보스 취소`);
                 await ensureLootPanelClosed(2000);
                 await setAutoHunting(false);
                 return "urgent_switch";
@@ -838,8 +872,8 @@
         while (bossQueue.length > 0 || currentBossIndex !== -1) {
             if (isHandlingDeath) break;
 
-            let currentTarget = currentBossIndex !== -1 
-                ? { index: currentBossIndex, name: BOSS_TARGETS[currentBossIndex]?.name || "보스" } 
+            let currentTarget = currentBossIndex !== -1
+                ? { index: currentBossIndex, name: BOSS_TARGETS[currentBossIndex]?.name || "보스" }
                 : bossQueue.shift();
 
             const bossIndex = currentTarget.index;
@@ -851,7 +885,7 @@
             }
 
             currentBossIndex = bossIndex;
-            let interruptedByMajangi = false;
+            let interruptedByPriority = false;
 
             console.log(`\n=== [보스 즉시 출동] [${bossIndex}] ${targetInfo.name} ===`);
 
@@ -862,13 +896,13 @@
                 if (mapOk) {
                     await ensureMount();
                     if (targetInfo.entryPath) {
-                        for (const wp of targetInfo.entryPath) await glideToTarget(wp.x, wp.y, 3.0, 2.5, 15);
+                        for (const wp of targetInfo.entryPath) await glideToTarget(wp.x, wp.y, 2.8, 2.3, 15);
                     }
                     await glideToTarget(targetInfo.x, targetInfo.y, 3.2, 2.5, 20);
 
                     const res = await huntBossAndLoot(240);
                     if (res === "urgent_switch") {
-                        interruptedByMajangi = true;
+                        interruptedByPriority = true;
                     }
                 }
             } catch (e) {
@@ -877,8 +911,11 @@
 
             if (isHandlingDeath) break;
 
-            if (interruptedByMajangi && !defeatedBosses.has(bossIndex)) {
-                bossQueue.splice(1, 0, currentTarget);
+            if (interruptedByPriority && !defeatedBosses.has(bossIndex)) {
+                // 최우선 보스들 바로 뒤 순서에 기존 보스 재예약
+                const insertPos = bossQueue.findIndex(b => !PRIORITY_BOSSES.has(b.index));
+                if (insertPos === -1) bossQueue.push(currentTarget);
+                else bossQueue.splice(insertPos, 0, currentTarget);
             }
             currentBossIndex = -1;
             await sleep(400);
@@ -894,16 +931,27 @@
 
     function enqueueBossTask(bossIndex, bossName) {
         if (!getBossEnabledStatus(bossIndex)) return;
-        if (!isBossHuntingEnabled && bossIndex !== 1) return;
-        if (bossIndex !== 1 && !isCurrentTimeInBossRange()) return;
+        const isPriority = PRIORITY_BOSSES.has(bossIndex);
+
+        if (!isBossHuntingEnabled && !isPriority) return;
+        if (!isPriority && !isCurrentTimeInBossRange()) return;
         if (defeatedBosses.has(bossIndex)) return;
 
-        if (bossIndex === 1) {
-            const idx = bossQueue.findIndex(b => b.index === 1);
+        // 💡 최우선 긴급 보스(마장기 / 숲길의 두 사슴) 처리
+        if (isPriority) {
+            const idx = bossQueue.findIndex(b => b.index === bossIndex);
             if (idx !== -1) bossQueue.splice(idx, 1);
-            bossQueue.unshift({ index: bossIndex, name: bossName });
-            if (isRunning && currentBossIndex !== 1) simulateKey('Escape');
-            else if (!isRunning && !isHandlingDeath) executeBossQueueWorker();
+
+            // 이미 대기 중인 다른 최우선 보스가 있다면 그 뒤에, 아니면 맨 앞에 삽입
+            const firstNonPriorityIdx = bossQueue.findIndex(b => !PRIORITY_BOSSES.has(b.index));
+            if (firstNonPriorityIdx === -1) bossQueue.push({ index: bossIndex, name: bossName });
+            else bossQueue.splice(firstNonPriorityIdx, 0, { index: bossIndex, name: bossName });
+
+            if (isRunning && !PRIORITY_BOSSES.has(currentBossIndex)) {
+                simulateKey('Escape');
+            } else if (!isRunning && !isHandlingDeath) {
+                executeBossQueueWorker();
+            }
             return;
         }
 
@@ -965,12 +1013,16 @@
         modal.id = 'modak-boss-modal';
         modal.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.6);z-index:100000;display:flex;align-items:center;justify-content:center;font-family:sans-serif;user-select:none;';
 
-        const listHTML = Object.entries(BOSS_TARGETS).map(([idx, b]) => `
-            <label style="display:flex;align-items:center;padding:6px 8px;margin-bottom:4px;background:rgba(255,255,255,0.05);border-radius:4px;cursor:pointer;font-size:13px;">
-                <input type="checkbox" class="boss-chk" data-idx="${idx}" ${getBossEnabledStatus(idx) ? 'checked' : ''} style="margin-right:10px;cursor:pointer;width:15px;height:15px;">
-                <span style="color:#eee;">[${idx}] ${b.name}</span>
-            </label>
-        `).join('');
+        const listHTML = Object.entries(BOSS_TARGETS).map(([idx, b]) => {
+            const isPrio = PRIORITY_BOSSES.has(Number(idx));
+            const badge = isPrio ? '<span style="color:#ffca28;font-size:11px;margin-left:6px;">[최우선]</span>' : '';
+            return `
+                <label style="display:flex;align-items:center;padding:6px 8px;margin-bottom:4px;background:rgba(255,255,255,0.05);border-radius:4px;cursor:pointer;font-size:13px;">
+                    <input type="checkbox" class="boss-chk" data-idx="${idx}" ${getBossEnabledStatus(idx) ? 'checked' : ''} style="margin-right:10px;cursor:pointer;width:15px;height:15px;">
+                    <span style="color:#eee;">[${idx}] ${b.name}${badge}</span>
+                </label>
+            `;
+        }).join('');
 
         modal.innerHTML = `
             <div style="background:#202020;border:1px solid rgba(255,255,255,0.2);border-radius:8px;width:320px;box-shadow:0 8px 25px rgba(0,0,0,0.8);overflow:hidden;">
@@ -1044,13 +1096,13 @@
             endH += `<option value="${h}" ${bossHuntEndHour === h ? 'selected' : ''}>${lbl}</option>`;
         }
 
-        const groundsHTML = HUNTING_GROUNDS.map(g => 
+        const groundsHTML = HUNTING_GROUNDS.map(g =>
             `<option value="${g.id}" ${selectedHuntingGround === g.id ? 'selected' : ''}>${g.name}</option>`
         ).join('');
 
         panel.innerHTML = `
             <div id="bot-header" style="background:rgba(40,40,40,0.95);padding:10px 12px;border-top-left-radius:7px;border-top-right-radius:7px;font-weight:bold;display:flex;justify-content:space-between;align-items:center;cursor:move;border-bottom:1px solid #444;">
-                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v3.84</span>
+                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v3.85</span>
                 <div>
                     <span id="bot-toggle" style="cursor:pointer;font-size:11px;color:#aaa;padding:2px 4px;">[접기]</span>
                 </div>
@@ -1198,8 +1250,8 @@
             defeatedBosses.delete(bIdx);
             if (!getBossEnabledStatus(bIdx)) return;
 
-            if (bIdx === 1) {
-                enqueueBossTask(bIdx, bName);
+            if (PRIORITY_BOSSES.has(bIdx)) {
+                enqueueBossTask(bIdx, bName); // 최우선 보스는 즉시 출동
             } else if (isBossHuntingEnabled) {
                 const reactionDelay = Math.floor(Math.random() * 701) + 800; // 800 ~ 1500ms
                 setTimeout(() => enqueueBossTask(bIdx, bName), reactionDelay);
@@ -1235,5 +1287,5 @@
     window.testMoveHuntingGround = returnToDefaultHuntingGround;
     window.testCheckBag = checkInventorySlotCount;
 
-    console.log("모닥 온라인 스마트 라우팅 네비게이션 v3.84 로딩 완료!");
+    console.log("모닥 온라인 스마트 라우팅 네비게이션 v3.85 로딩 완료!");
 })();
