@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.83 (Pulse Precision & Updated Portals)
+// @name         모닥 온라인 보스 오토봇 v3.84 (Smooth Inertia Glide & Smart Routing)
 // @namespace    http://tampermonkey.net/
-// @version      3.83
+// @version      3.84
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -95,11 +95,11 @@
             { to: "협곡 진입로", portal: { x: 15.36, y: 355.78 } }
         ],
         "붉은숲 피난처": [
-            { to: "수호자의 안식처", portal: { x: 62.15, y: 594.78 } }, // 💡 갱신 완료
+            { to: "수호자의 안식처", portal: { x: 62.15, y: 594.78 } },
             { to: "고요한 숲길", portal: { x: 35.46, y: 658.50 } }
         ],
         "수호자의 안식처": [
-            { to: "붉은숲 피난처", portal: { x: 70.13, y: 584.31 } } // 💡 갱신 완료
+            { to: "붉은숲 피난처", portal: { x: 70.13, y: 584.31 } }
         ]
     };
 
@@ -171,7 +171,7 @@
         }
     }
 
-    // 💡 [완벽 해결] 원거리 고속 + 근거리 펄스(톡톡) 정밀 안착 글라이딩 엔진
+    // 💡 [자연스러운 주행] 연속 글라이딩 + 관성 예측 조기 브레이크 엔진
     async function glideToTarget(targetX, targetY, radiusX = 3.5, radiusY = 2.8, maxTimeoutSec = 20) {
         console.log(`🧭 [글라이딩] (${targetX.toFixed(2)}, ${targetY.toFixed(2)}) 이동 시작`);
         const startTime = Date.now();
@@ -193,66 +193,80 @@
             activeKeys.clear();
         };
 
-        let lastPos = null;
+        let prevPos = null;
         let lastMoveProgressTime = Date.now();
 
         try {
             while (Date.now() - startTime < maxTimeoutSec * 1000) {
                 const cur = getCoords();
-                if (!cur) { await sleep(50); continue; }
+                if (!cur) { await sleep(45); continue; }
 
-                const diffX = targetX - cur.x; // +: D, -: A
-                const diffY = targetY - cur.y; // +: S, -: W
+                // 현재 프레임 이동 속도(관성) 계산
+                const velX = prevPos ? (cur.x - prevPos.x) : 0;
+                const velY = prevPos ? (cur.y - prevPos.y) : 0;
+
+                // 키를 뗐을 때 관성으로 더 미끄러질 예상 위치
+                const predictedX = cur.x + velX * 1.2;
+                const predictedY = cur.y + velY * 1.2;
+
+                const diffX = targetX - cur.x;
+                const diffY = targetY - cur.y;
                 const absX = Math.abs(diffX);
                 const absY = Math.abs(diffY);
 
-                // 1. 목표 반경 진입 즉시 완전 정지 및 종료
+                // 1. 목표 반경 진입 시 즉시 정지
                 if (absX <= radiusX && absY <= radiusY) {
                     stopAll();
-                    await sleep(100);
+                    await sleep(80);
                     return true;
                 }
 
-                // 2. 근거리(8.0 이내) 진입 시: 오버슈트 방지를 위해 짧게 톡 누르고(65ms) 쉬는(95ms) 펄스 이동
-                if (absX <= 8.0 && absY <= 8.0) {
+                // 2. 관성 예측 위치가 이미 목표 반경 안이라면 미리 키를 떼고 자연스럽게 감속
+                if (Math.abs(targetX - predictedX) <= radiusX && Math.abs(targetY - predictedY) <= radiusY && activeKeys.size > 0) {
                     stopAll();
-                    const pulseKeys = [];
-                    if (diffX > radiusX) pulseKeys.push('d');
-                    else if (diffX < -radiusX) pulseKeys.push('a');
-
-                    if (diffY > radiusY) pulseKeys.push('s');
-                    else if (diffY < -radiusY) pulseKeys.push('w');
-
-                    if (pulseKeys.length === 0) return true;
-
-                    for (const k of pulseKeys) fireKey('keydown', k);
-                    await sleep(65); // 짧게 전진
-                    for (const k of pulseKeys) fireKey('keyup', k);
-                    await sleep(95); // 관성 정지 및 좌표 갱신 대기
+                    await sleep(120);
+                    prevPos = getCoords();
                     continue;
                 }
 
-                // 3. 원거리(8.0 초과) 끼임 감지
-                if (lastPos) {
-                    const distMoved = Math.hypot(cur.x - lastPos.x, cur.y - lastPos.y);
-                    if (distMoved > 0.4) {
-                        lastMoveProgressTime = Date.now();
-                        lastPos = cur;
-                    } else if (Date.now() - lastMoveProgressTime > 900) {
-                        stopAll();
-                        const unstickKey = diffX > 0 ? 's' : 'w';
-                        fireKey('keydown', unstickKey);
-                        await sleep(220);
-                        fireKey('keyup', unstickKey);
-                        lastMoveProgressTime = Date.now();
-                        lastPos = getCoords();
-                        continue;
-                    }
-                } else {
-                    lastPos = cur;
+                // 3. 완전히 멈춰 있는 상태에서 목표 바로 코앞(4.5 이내)만 남았을 때 부드러운 단발 보정
+                if (absX <= 4.5 && absY <= 4.5 && Math.hypot(velX, velY) < 0.15) {
+                    const nudgeKeys = [];
+                    if (diffX > radiusX) nudgeKeys.push('d');
+                    else if (diffX < -radiusX) nudgeKeys.push('a');
+                    if (diffY > radiusY) nudgeKeys.push('s');
+                    else if (diffY < -radiusY) nudgeKeys.push('w');
+
+                    if (nudgeKeys.length === 0) return true;
+
+                    for (const k of nudgeKeys) fireKey('keydown', k);
+                    await sleep(115);
+                    for (const k of nudgeKeys) fireKey('keyup', k);
+                    await sleep(90);
+                    prevPos = getCoords();
+                    continue;
                 }
 
-                // 4. 원거리 고속 연속 주행
+                // 4. 원거리(4.5 초과) 끼임 감지
+                if (absX > 4.5 || absY > 4.5) {
+                    if (prevPos) {
+                        const distMoved = Math.hypot(velX, velY);
+                        if (distMoved > 0.35) {
+                            lastMoveProgressTime = Date.now();
+                        } else if (Date.now() - lastMoveProgressTime > 900) {
+                            stopAll();
+                            const unstickKey = diffX > 0 ? 's' : 'w';
+                            fireKey('keydown', unstickKey);
+                            await sleep(220);
+                            fireKey('keyup', unstickKey);
+                            lastMoveProgressTime = Date.now();
+                            prevPos = getCoords();
+                            continue;
+                        }
+                    }
+                }
+
+                // 5. 기본 연속 주행 (목표 축 도달 시 해당 축 키만 개별 해제)
                 const desired = [];
                 if (diffX > radiusX) desired.push('d');
                 else if (diffX < -radiusX) desired.push('a');
@@ -261,7 +275,8 @@
                 else if (diffY < -radiusY) desired.push('w');
 
                 updateKeys(desired);
-                await sleep(50);
+                prevPos = cur;
+                await sleep(45);
             }
         } finally {
             stopAll();
@@ -652,7 +667,7 @@
                 forceClickElement(selectSellBtn);
                 await randomSleep(800, 1200);
 
-                const confirmBtn = document.querySelector('button.is-danger') ||
+                const confirmBtn = document.querySelector('button.is-danger') || 
                                    Array.from(document.querySelectorAll('button')).find(b => b.innerText.trim() === "판매하기");
                 if (confirmBtn) {
                     forceClickElement(confirmBtn);
@@ -823,8 +838,8 @@
         while (bossQueue.length > 0 || currentBossIndex !== -1) {
             if (isHandlingDeath) break;
 
-            let currentTarget = currentBossIndex !== -1
-                ? { index: currentBossIndex, name: BOSS_TARGETS[currentBossIndex]?.name || "보스" }
+            let currentTarget = currentBossIndex !== -1 
+                ? { index: currentBossIndex, name: BOSS_TARGETS[currentBossIndex]?.name || "보스" } 
                 : bossQueue.shift();
 
             const bossIndex = currentTarget.index;
@@ -1029,13 +1044,13 @@
             endH += `<option value="${h}" ${bossHuntEndHour === h ? 'selected' : ''}>${lbl}</option>`;
         }
 
-        const groundsHTML = HUNTING_GROUNDS.map(g =>
+        const groundsHTML = HUNTING_GROUNDS.map(g => 
             `<option value="${g.id}" ${selectedHuntingGround === g.id ? 'selected' : ''}>${g.name}</option>`
         ).join('');
 
         panel.innerHTML = `
             <div id="bot-header" style="background:rgba(40,40,40,0.95);padding:10px 12px;border-top-left-radius:7px;border-top-right-radius:7px;font-weight:bold;display:flex;justify-content:space-between;align-items:center;cursor:move;border-bottom:1px solid #444;">
-                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v3.83</span>
+                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v3.84</span>
                 <div>
                     <span id="bot-toggle" style="cursor:pointer;font-size:11px;color:#aaa;padding:2px 4px;">[접기]</span>
                 </div>
@@ -1220,5 +1235,5 @@
     window.testMoveHuntingGround = returnToDefaultHuntingGround;
     window.testCheckBag = checkInventorySlotCount;
 
-    console.log("모닥 온라인 스마트 라우팅 네비게이션 v3.83 로딩 완료!");
+    console.log("모닥 온라인 스마트 라우팅 네비게이션 v3.84 로딩 완료!");
 })();
