@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.82 (Anti-Oscillation Portal & Smart Routing)
+// @name         모닥 온라인 보스 오토봇 v3.83 (Pulse Precision & Updated Portals)
 // @namespace    http://tampermonkey.net/
-// @version      3.82
+// @version      3.83
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -95,11 +95,11 @@
             { to: "협곡 진입로", portal: { x: 15.36, y: 355.78 } }
         ],
         "붉은숲 피난처": [
-            { to: "수호자의 안식처", portal: { x: 62.15, y: 594.78 } },
+            { to: "수호자의 안식처", portal: { x: 62.15, y: 594.78 } }, // 💡 갱신 완료
             { to: "고요한 숲길", portal: { x: 35.46, y: 658.50 } }
         ],
         "수호자의 안식처": [
-            { to: "붉은숲 피난처", portal: { x: 70.13, y: 584.31 } }
+            { to: "붉은숲 피난처", portal: { x: 70.13, y: 584.31 } } // 💡 갱신 완료
         ]
     };
 
@@ -171,8 +171,8 @@
         }
     }
 
-    // 💡 [개선] 오버슈트 및 포탈 앞 좌우 진동 방지 글라이딩 엔진
-    async function glideToTarget(targetX, targetY, radiusX = 3.2, radiusY = 2.5, maxTimeoutSec = 20) {
+    // 💡 [완벽 해결] 원거리 고속 + 근거리 펄스(톡톡) 정밀 안착 글라이딩 엔진
+    async function glideToTarget(targetX, targetY, radiusX = 3.5, radiusY = 2.8, maxTimeoutSec = 20) {
         console.log(`🧭 [글라이딩] (${targetX.toFixed(2)}, ${targetY.toFixed(2)}) 이동 시작`);
         const startTime = Date.now();
         let activeKeys = new Set();
@@ -199,52 +199,69 @@
         try {
             while (Date.now() - startTime < maxTimeoutSec * 1000) {
                 const cur = getCoords();
-                if (!cur) { await sleep(40); continue; }
+                if (!cur) { await sleep(50); continue; }
 
                 const diffX = targetX - cur.x; // +: D, -: A
                 const diffY = targetY - cur.y; // +: S, -: W
                 const absX = Math.abs(diffX);
                 const absY = Math.abs(diffY);
 
-                // 1. 목표 반경 진입 시 즉시 정지 (오버슈트 방지)
+                // 1. 목표 반경 진입 즉시 완전 정지 및 종료
                 if (absX <= radiusX && absY <= radiusY) {
                     stopAll();
-                    await sleep(80);
+                    await sleep(100);
                     return true;
                 }
 
-                // 2. 목표에 거의 다 왔을 때(거리 5.5 이내)는 끼임 회피 금지 (포탈 앞 진동 차단)
-                if (absX > 5.5 || absY > 5.5) {
-                    if (lastPos) {
-                        const distMoved = Math.hypot(cur.x - lastPos.x, cur.y - lastPos.y);
-                        if (distMoved > 0.4) {
-                            lastMoveProgressTime = Date.now();
-                            lastPos = cur;
-                        } else if (Date.now() - lastMoveProgressTime > 900) {
-                            stopAll();
-                            const unstickKey = diffX > 0 ? 's' : 'w';
-                            fireKey('keydown', unstickKey);
-                            await sleep(220);
-                            fireKey('keyup', unstickKey);
-                            lastMoveProgressTime = Date.now();
-                            lastPos = getCoords();
-                            continue;
-                        }
-                    } else {
-                        lastPos = cur;
-                    }
+                // 2. 근거리(8.0 이내) 진입 시: 오버슈트 방지를 위해 짧게 톡 누르고(65ms) 쉬는(95ms) 펄스 이동
+                if (absX <= 8.0 && absY <= 8.0) {
+                    stopAll();
+                    const pulseKeys = [];
+                    if (diffX > radiusX) pulseKeys.push('d');
+                    else if (diffX < -radiusX) pulseKeys.push('a');
+
+                    if (diffY > radiusY) pulseKeys.push('s');
+                    else if (diffY < -radiusY) pulseKeys.push('w');
+
+                    if (pulseKeys.length === 0) return true;
+
+                    for (const k of pulseKeys) fireKey('keydown', k);
+                    await sleep(65); // 짧게 전진
+                    for (const k of pulseKeys) fireKey('keyup', k);
+                    await sleep(95); // 관성 정지 및 좌표 갱신 대기
+                    continue;
                 }
 
-                // 3. 불감대(Deadzone) 적용으로 좌우 미세 떨림 제거
-                const desired = [];
-                if (diffX > radiusX * 0.9) desired.push('d');
-                else if (diffX < -radiusX * 0.9) desired.push('a');
+                // 3. 원거리(8.0 초과) 끼임 감지
+                if (lastPos) {
+                    const distMoved = Math.hypot(cur.x - lastPos.x, cur.y - lastPos.y);
+                    if (distMoved > 0.4) {
+                        lastMoveProgressTime = Date.now();
+                        lastPos = cur;
+                    } else if (Date.now() - lastMoveProgressTime > 900) {
+                        stopAll();
+                        const unstickKey = diffX > 0 ? 's' : 'w';
+                        fireKey('keydown', unstickKey);
+                        await sleep(220);
+                        fireKey('keyup', unstickKey);
+                        lastMoveProgressTime = Date.now();
+                        lastPos = getCoords();
+                        continue;
+                    }
+                } else {
+                    lastPos = cur;
+                }
 
-                if (diffY > radiusY * 0.9) desired.push('s');
-                else if (diffY < -radiusY * 0.9) desired.push('w');
+                // 4. 원거리 고속 연속 주행
+                const desired = [];
+                if (diffX > radiusX) desired.push('d');
+                else if (diffX < -radiusX) desired.push('a');
+
+                if (diffY > radiusY) desired.push('s');
+                else if (diffY < -radiusY) desired.push('w');
 
                 updateKeys(desired);
-                await sleep(40);
+                await sleep(50);
             }
         } finally {
             stopAll();
@@ -375,7 +392,7 @@
         return null;
     }
 
-    // 💡 포탈 단계 수행 헬퍼 (반경 3.5, 3.0 적용 및 F 이중 입력으로 진동 없이 즉시 진입)
+    // 💡 포탈 단계 수행 헬퍼
     async function traversePortalStep(step) {
         await ensureMount();
         if (step.waypoints) {
@@ -383,7 +400,7 @@
                 await glideToTarget(wp.x, wp.y, 3.0, 2.5, 15);
             }
         }
-        await glideToTarget(step.portal.x, step.portal.y, 3.5, 3.0, 18);
+        await glideToTarget(step.portal.x, step.portal.y, 3.5, 2.8, 18);
         simulateKey('f');
         await sleep(150);
         simulateKey('f');
@@ -1018,7 +1035,7 @@
 
         panel.innerHTML = `
             <div id="bot-header" style="background:rgba(40,40,40,0.95);padding:10px 12px;border-top-left-radius:7px;border-top-right-radius:7px;font-weight:bold;display:flex;justify-content:space-between;align-items:center;cursor:move;border-bottom:1px solid #444;">
-                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v3.82</span>
+                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v3.83</span>
                 <div>
                     <span id="bot-toggle" style="cursor:pointer;font-size:11px;color:#aaa;padding:2px 4px;">[접기]</span>
                 </div>
@@ -1203,5 +1220,5 @@
     window.testMoveHuntingGround = returnToDefaultHuntingGround;
     window.testCheckBag = checkInventorySlotCount;
 
-    console.log("모닥 온라인 스마트 라우팅 네비게이션 v3.82 로딩 완료!");
+    console.log("모닥 온라인 스마트 라우팅 네비게이션 v3.83 로딩 완료!");
 })();
