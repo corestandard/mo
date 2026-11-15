@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.85 (Priority Boss: 숲길의 두 사슴 & Portal Retry)
+// @name         모닥 온라인 보스 오토봇 v3.86 (1s Departure & 8x Portal Retry)
 // @namespace    http://tampermonkey.net/
-// @version      3.85
+// @version      3.86
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -89,7 +89,7 @@
             { to: "잊혀진 고성 중앙부", portal: { x: 687.38, y: 74.65 } }
         ],
         "뼈바람 협곡": [
-            { to: "협곡 진입로", portal: { x: 3.94, y: 433.45 } } // 💡 실측 기반 갱신 완료
+            { to: "협곡 진입로", portal: { x: 3.94, y: 433.45 } }
         ],
         "협곡 진입로": [
             { to: "뼈바람 협곡", portal: { x: -11.66, y: 424.02 } },
@@ -105,7 +105,6 @@
         "수호자의 안식처": [
             { to: "붉은숲 피난처", portal: { x: 70.13, y: 584.31 } }
         ],
-
         "고요한 숲길": [
             { to: "붉은숲 피난처", portal: { x: 50.61, y: 670.04 } }
         ]
@@ -155,10 +154,10 @@
         while (Date.now() - startTime < timeoutSec * 1000) {
             const cur = getCurrentMapName();
             if (cur.includes(expectedName)) {
-                await randomSleep(400, 650);
+                await randomSleep(250, 400);
                 return true;
             }
-            await sleep(200);
+            await sleep(150);
         }
         return false;
     }
@@ -223,14 +222,14 @@
                 // 1. 목표 반경 진입 시 즉시 정지
                 if (absX <= radiusX && absY <= radiusY) {
                     stopAll();
-                    await sleep(80);
+                    await sleep(60);
                     return true;
                 }
 
                 // 2. 관성 예측 위치가 목표 반경 안이면 미리 키를 떼고 자연스럽게 감속
                 if (Math.abs(targetX - predictedX) <= radiusX && Math.abs(targetY - predictedY) <= radiusY && activeKeys.size > 0) {
                     stopAll();
-                    await sleep(120);
+                    await sleep(100);
                     prevPos = getCoords();
                     continue;
                 }
@@ -246,9 +245,9 @@
                     if (nudgeKeys.length === 0) return true;
 
                     for (const k of nudgeKeys) fireKey('keydown', k);
-                    await sleep(115);
+                    await sleep(110);
                     for (const k of nudgeKeys) fireKey('keyup', k);
-                    await sleep(90);
+                    await sleep(85);
                     prevPos = getCoords();
                     continue;
                 }
@@ -303,25 +302,29 @@
                btn.getAttribute('aria-label') === '내리기';
     }
 
-    async function ensureMount(maxRetries = 4) {
+    // 💡 [초고속 탑승] 불필요한 대기 제거 (이미 탑승 중이면 즉시 통과)
+    async function ensureMount(maxRetries = 3) {
+        if (isCurrentlyMounted()) return true;
+
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            if (isCurrentlyMounted()) return true;
-            await ensureLootPanelClosed(1000);
+            if (document.querySelector('section.loot-panel')) {
+                await ensureLootPanelClosed(600);
+            }
 
             const mountBtn = getMountButton();
-            if (!mountBtn) simulateKey('r');
+            if (!mountBtn) simulateKey('r', 80);
             else forceClickElement(mountBtn);
 
             const waitStart = Date.now();
-            while (Date.now() - waitStart < 1500) {
-                await sleep(150);
+            while (Date.now() - waitStart < 900) {
+                await sleep(80);
                 if (isCurrentlyMounted()) {
-                    await sleep(200);
+                    await sleep(80);
                     return true;
                 }
             }
             simulateKey('Escape');
-            await sleep(250);
+            await sleep(120);
         }
         return false;
     }
@@ -413,43 +416,42 @@
         return null;
     }
 
-    // 💡 [강화] 포탈 중심 정밀 접근(2.0 이내) + 맵 전환 확인 시까지 단계별 재시도
+    // 💡 [포탈 재시도 8회 적용] 매 시도마다 탈것 확인 + 포탈 정중앙 재이동 + F 입력을 함께 수행
     async function traversePortalStep(step) {
         await ensureMount();
 
         if (step.waypoints) {
             for (const wp of step.waypoints) {
-                await glideToTarget(wp.x, wp.y, 2.8, 2.3, 15);
+                await glideToTarget(wp.x, wp.y, 2.5, 2.0, 15);
             }
         }
 
-        await glideToTarget(step.portal.x, step.portal.y, 2.0, 1.8, 18);
-        await sleep(120);
+        for (let attempt = 1; attempt <= 8; attempt++) {
+            if (getCurrentMapName().includes(step.to)) return true;
 
-        for (let attempt = 1; attempt <= 4; attempt++) {
-            if (getCurrentMapName().includes(step.to)) {
-                await randomSleep(350, 550);
-                return true;
-            }
+            const rx = attempt === 1 ? 1.8 : 1.2;
+            const ry = attempt === 1 ? 1.6 : 1.2;
+
+            await ensureMount();
+            await glideToTarget(step.portal.x, step.portal.y, rx, ry, 10);
+            await sleep(60);
 
             if (document.querySelector('section.loot-panel')) {
-                await ensureLootPanelClosed(1000);
+                await ensureLootPanelClosed(600);
             }
 
-            simulateKey('f', 120);
+            simulateKey('f', 100);
 
             const waitStart = Date.now();
-            while (Date.now() - waitStart < 1800) {
+            while (Date.now() - waitStart < 1500) {
                 if (getCurrentMapName().includes(step.to)) {
-                    await randomSleep(350, 550);
+                    await sleep(250);
                     return true;
                 }
-                await sleep(150);
+                await sleep(100);
             }
 
-            console.log(`  -> [포탈 재시도 ${attempt}/4] '${step.to}' 포탈 정중앙 재접근 중...`);
-            await glideToTarget(step.portal.x, step.portal.y, 1.3, 1.3, 5);
-            await sleep(100);
+            console.log(`  -> [포탈 재시도 ${attempt}/8] '${step.to}' 포탈 정중앙 재이동 후 다시 진입합니다.`);
         }
 
         return false;
@@ -841,7 +843,6 @@
                 return true;
             }
 
-            // 💡 최우선 긴급 보스(1: 마장기, 10: 두 사슴) 대기열 최상단 진입 시 현재 일반 보스 즉시 중단
             if (bossQueue.length > 0 && PRIORITY_BOSSES.has(bossQueue[0].index) && !PRIORITY_BOSSES.has(currentBossIndex)) {
                 console.log(`  -> [긴급 탈출] 최우선 보스(${bossQueue[0].name}) 출현으로 현재 보스 취소`);
                 await ensureLootPanelClosed(2000);
@@ -887,7 +888,7 @@
             currentBossIndex = bossIndex;
             let interruptedByPriority = false;
 
-            console.log(`\n=== [보스 즉시 출동] [${bossIndex}] ${targetInfo.name} ===`);
+            console.log(`\n=== [보스 출동] [${bossIndex}] ${targetInfo.name} ===`);
 
             try {
                 await setAutoHunting(false);
@@ -912,7 +913,6 @@
             if (isHandlingDeath) break;
 
             if (interruptedByPriority && !defeatedBosses.has(bossIndex)) {
-                // 최우선 보스들 바로 뒤 순서에 기존 보스 재예약
                 const insertPos = bossQueue.findIndex(b => !PRIORITY_BOSSES.has(b.index));
                 if (insertPos === -1) bossQueue.push(currentTarget);
                 else bossQueue.splice(insertPos, 0, currentTarget);
@@ -937,12 +937,10 @@
         if (!isPriority && !isCurrentTimeInBossRange()) return;
         if (defeatedBosses.has(bossIndex)) return;
 
-        // 💡 최우선 긴급 보스(마장기 / 숲길의 두 사슴) 처리
         if (isPriority) {
             const idx = bossQueue.findIndex(b => b.index === bossIndex);
             if (idx !== -1) bossQueue.splice(idx, 1);
 
-            // 이미 대기 중인 다른 최우선 보스가 있다면 그 뒤에, 아니면 맨 앞에 삽입
             const firstNonPriorityIdx = bossQueue.findIndex(b => !PRIORITY_BOSSES.has(b.index));
             if (firstNonPriorityIdx === -1) bossQueue.push({ index: bossIndex, name: bossName });
             else bossQueue.splice(firstNonPriorityIdx, 0, { index: bossIndex, name: bossName });
@@ -1102,7 +1100,7 @@
 
         panel.innerHTML = `
             <div id="bot-header" style="background:rgba(40,40,40,0.95);padding:10px 12px;border-top-left-radius:7px;border-top-right-radius:7px;font-weight:bold;display:flex;justify-content:space-between;align-items:center;cursor:move;border-bottom:1px solid #444;">
-                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v3.85</span>
+                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v3.86</span>
                 <div>
                     <span id="bot-toggle" style="cursor:pointer;font-size:11px;color:#aaa;padding:2px 4px;">[접기]</span>
                 </div>
@@ -1227,7 +1225,7 @@
         };
     }
 
-    // 💡 월드 이벤트 채팅 감시
+    // 💡 월드 이벤트 채팅 감시 (출발 지연 약 1초 적용)
     const processedMessages = new Set();
     function handleWorldChat(node) {
         const textEl = node.querySelector('.chat-msg-text');
@@ -1250,10 +1248,9 @@
             defeatedBosses.delete(bIdx);
             if (!getBossEnabledStatus(bIdx)) return;
 
-            if (PRIORITY_BOSSES.has(bIdx)) {
-                enqueueBossTask(bIdx, bName); // 최우선 보스는 즉시 출동
-            } else if (isBossHuntingEnabled) {
-                const reactionDelay = Math.floor(Math.random() * 701) + 800; // 800 ~ 1500ms
+            const isPriority = PRIORITY_BOSSES.has(bIdx);
+            if (isPriority || isBossHuntingEnabled) {
+                const reactionDelay = Math.floor(Math.random() * 251) + 900; // 약 1초 (900 ~ 1150ms)
                 setTimeout(() => enqueueBossTask(bIdx, bName), reactionDelay);
             }
         } else if (text.includes("처치되었습니다")) {
@@ -1287,5 +1284,5 @@
     window.testMoveHuntingGround = returnToDefaultHuntingGround;
     window.testCheckBag = checkInventorySlotCount;
 
-    console.log("모닥 온라인 스마트 라우팅 네비게이션 v3.85 로딩 완료!");
+    console.log("모닥 온라인 스마트 라우팅 네비게이션 v3.86 로딩 완료!");
 })();
