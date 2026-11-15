@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.86 (1s Departure & 8x Portal Retry)
+// @name         모닥 온라인 보스 오토봇 v3.87 (Bone Canyon 2 Waypoint & Full Routing)
 // @namespace    http://tampermonkey.net/
-// @version      3.86
+// @version      3.87
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -46,7 +46,7 @@
         { id: "wasteland_2", name: "황야2 (작은거 - 선인장 액기스)", map: "황야", x: 349.09, y: 290.61 },
         { id: "canyon_entry", name: "협곡 진입로 (피울음 가죽갑옷)", map: "협곡 진입로", x: -28.44, y: 394.10 },
         { id: "bone_canyon", name: "뼈바람 협곡 (강철비 화살통, 혈석 반지)", map: "뼈바람 협곡", x: 61.13, y: 455.27 },
-        { id: "bone_canyon_2", name: "뼈바람 협곡2 (강철비 화살통, 혈석 반지)", map: "뼈바람 협곡", x: -27.93, y: 462.34 },
+        { id: "bone_canyon_2", name: "뼈바람 협곡2 (강철비 화살통, 혈석 반지)", map: "뼈바람 협곡", entryPath: [{ x: 3.94, y: 433.45 }], x: -27.93, y: 462.34 },
         { id: "archive", name: "망국의 기록 보관소 (잊히지 않은 기도)", map: "망국의 기록보관소", x: 700.23, y: 47.21 },
         { id: "castle_center_east", name: "잊혀진 고성 중앙부_동쪽 (추격의 반지)", map: "잊혀진 고성 중앙부", x: 858.13, y: 114.99 },
         { id: "castle_center_west", name: "잊혀진 고성 중앙부_서쪽 (추격의 반지)", map: "잊혀진 고성 중앙부", x: 696.95, y: 114.46 },
@@ -703,7 +703,7 @@
                 forceClickElement(selectSellBtn);
                 await randomSleep(800, 1200);
 
-                const confirmBtn = document.querySelector('button.is-danger') ||
+                const confirmBtn = document.querySelector('button.is-danger') || 
                                    Array.from(document.querySelectorAll('button')).find(b => b.innerText.trim() === "판매하기");
                 if (confirmBtn) {
                     forceClickElement(confirmBtn);
@@ -763,7 +763,7 @@
         return false;
     }
 
-    // 💡 [기본 사냥터 복귀 및 인벤토리 분기 실행]
+    // 💡 [기본 사냥터 복귀 및 인벤토리 분기 실행] (중간 경유지 entryPath 지원)
     async function moveToSelectedHuntingGround() {
         const target = HUNTING_GROUNDS.find(g => g.id === selectedHuntingGround) || HUNTING_GROUNDS[0];
         console.log(`\n🎯 [기본 사냥터 복귀 시작] 대상: '${target.name}' (${target.map})`);
@@ -789,6 +789,13 @@
         }
 
         await ensureMount();
+
+        if (target.entryPath) {
+            for (const wp of target.entryPath) {
+                await glideToTarget(wp.x, wp.y, 2.8, 2.3, 15);
+            }
+        }
+
         await glideToTarget(target.x, target.y, 3.2, 2.5, 20);
         await setAutoHunting(true);
         console.log("--- [기본 사냥터 안착] 자동 사냥 활성화 ---");
@@ -874,8 +881,8 @@
         while (bossQueue.length > 0 || currentBossIndex !== -1) {
             if (isHandlingDeath) break;
 
-            let currentTarget = currentBossIndex !== -1
-                ? { index: currentBossIndex, name: BOSS_TARGETS[currentBossIndex]?.name || "보스" }
+            let currentTarget = currentBossIndex !== -1 
+                ? { index: currentBossIndex, name: BOSS_TARGETS[currentBossIndex]?.name || "보스" } 
                 : bossQueue.shift();
 
             const bossIndex = currentTarget.index;
@@ -1095,13 +1102,13 @@
             endH += `<option value="${h}" ${bossHuntEndHour === h ? 'selected' : ''}>${lbl}</option>`;
         }
 
-        const groundsHTML = HUNTING_GROUNDS.map(g =>
+        const groundsHTML = HUNTING_GROUNDS.map(g => 
             `<option value="${g.id}" ${selectedHuntingGround === g.id ? 'selected' : ''}>${g.name}</option>`
         ).join('');
 
         panel.innerHTML = `
             <div id="bot-header" style="background:rgba(40,40,40,0.95);padding:10px 12px;border-top-left-radius:7px;border-top-right-radius:7px;font-weight:bold;display:flex;justify-content:space-between;align-items:center;cursor:move;border-bottom:1px solid #444;">
-                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v3.86</span>
+                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v3.87</span>
                 <div>
                     <span id="bot-toggle" style="cursor:pointer;font-size:11px;color:#aaa;padding:2px 4px;">[접기]</span>
                 </div>
@@ -1285,5 +1292,5 @@
     window.testMoveHuntingGround = returnToDefaultHuntingGround;
     window.testCheckBag = checkInventorySlotCount;
 
-    console.log("모닥 온라인 스마트 라우팅 네비게이션 v3.86 로딩 완료!");
+    console.log("모닥 온라인 스마트 라우팅 네비게이션 v3.87 로딩 완료!");
 })();
