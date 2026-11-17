@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.87 (Bone Canyon 2 Waypoint & Full Routing)
+// @name         모닥 온라인 보스 오토봇 v3.88 (Auto Enhance +8 & Priority Interrupt)
 // @namespace    http://tampermonkey.net/
-// @version      3.87
+// @version      3.88
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -21,6 +21,7 @@
     };
 
     const TOWN_SHOP = { x: 42.40, y: 184.74 };
+    const TOWN_BLACKSMITH = { x: 40.78, y: 204.90 }; // 💡 실측 기반 대장장이 좌표
 
     // 💡 [실측 기반 보스 전투 위치]
     const BOSS_TARGETS = {
@@ -114,6 +115,7 @@
     let selectedHuntingGround = localStorage.getItem('modak_default_ground') || "wasteland_1";
     let isBossHuntingEnabled = localStorage.getItem('modak_boss_hunt_enabled') !== 'false';
     let isShopSellEnabled = localStorage.getItem('modak_shop_sell_enabled') !== 'false';
+    let isAutoEnhanceEnabled = localStorage.getItem('modak_auto_enhance_enabled') !== 'false';
     let bossHuntStartHour = parseInt(localStorage.getItem('modak_boss_start_hour') ?? '0', 10);
     let bossHuntEndHour = parseInt(localStorage.getItem('modak_boss_end_hour') ?? '24', 10);
 
@@ -220,14 +222,12 @@
                 const absX = Math.abs(diffX);
                 const absY = Math.abs(diffY);
 
-                // 1. 목표 반경 진입 시 즉시 정지
                 if (absX <= radiusX && absY <= radiusY) {
                     stopAll();
                     await sleep(60);
                     return true;
                 }
 
-                // 2. 관성 예측 위치가 목표 반경 안이면 미리 키를 떼고 자연스럽게 감속
                 if (Math.abs(targetX - predictedX) <= radiusX && Math.abs(targetY - predictedY) <= radiusY && activeKeys.size > 0) {
                     stopAll();
                     await sleep(100);
@@ -235,7 +235,6 @@
                     continue;
                 }
 
-                // 3. 완전히 멈춘 상태에서 코앞(4.5 이내) 미세 보정
                 if (absX <= 4.5 && absY <= 4.5 && Math.hypot(velX, velY) < 0.15) {
                     const nudgeKeys = [];
                     if (diffX > radiusX) nudgeKeys.push('d');
@@ -253,7 +252,6 @@
                     continue;
                 }
 
-                // 4. 원거리(4.5 초과) 끼임 감지
                 if (absX > 4.5 || absY > 4.5) {
                     if (prevPos) {
                         const distMoved = Math.hypot(velX, velY);
@@ -272,7 +270,6 @@
                     }
                 }
 
-                // 5. 기본 연속 주행
                 const desired = [];
                 if (diffX > radiusX) desired.push('d');
                 else if (diffX < -radiusX) desired.push('a');
@@ -303,7 +300,6 @@
                btn.getAttribute('aria-label') === '내리기';
     }
 
-    // 💡 [초고속 탑승] 불필요한 대기 제거 (이미 탑승 중이면 즉시 통과)
     async function ensureMount(maxRetries = 3) {
         if (isCurrentlyMounted()) return true;
 
@@ -360,7 +356,6 @@
         return "none";
     }
 
-    // 💡 현재 맵에 존재하는 캠프파이어와 상호작용
     async function interactWithLocalCampfire() {
         const curMap = getCurrentMapName();
         const camp = CAMPFIRES[curMap];
@@ -393,7 +388,6 @@
         return false;
     }
 
-    // 💡 최단 경로(BFS) 탐색: startMap -> targetMap 이동 계획 수립
     function findPathBetweenMaps(startMap, targetMap) {
         if (startMap === targetMap) return [];
 
@@ -417,7 +411,6 @@
         return null;
     }
 
-    // 💡 [포탈 재시도 8회 적용] 매 시도마다 탈것 확인 + 포탈 정중앙 재이동 + F 입력을 함께 수행
     async function traversePortalStep(step) {
         await ensureMount();
 
@@ -458,7 +451,6 @@
         return false;
     }
 
-    // 💡 [핵심 라우터] 이동 시작 시 자동 전투를 먼저 끄고 최단 경로로 이동
     async function navigateToMap(targetMap) {
         await setAutoHunting(false);
 
@@ -467,7 +459,6 @@
 
         console.log(`🗺️ [스마트 라우팅 시작] '${curMap}' ➔ '${targetMap}'`);
 
-        // 1. 도보 연결 거리 확인 (포탈 1회 이하 경유로 직행 가능한지)
         const walkPath = findPathBetweenMaps(curMap, targetMap);
 
         if (walkPath && walkPath.length <= 1) {
@@ -479,7 +470,6 @@
             return true;
         }
 
-        // 2. 현재 맵에 캠프파이어가 없다면, 가장 가까운 캠프파이어가 있는 맵으로 이동
         if (!CAMPFIRES[curMap]) {
             console.log(`  -> 현재 맵('${curMap}')에 캠프파이어 없음. 캠프파이어 보유 맵으로 이동합니다.`);
             let bestPath = null;
@@ -504,7 +494,6 @@
             }
         }
 
-        // 3. 목표 맵에 캠프파이어가 직접 있다면 웨이포인트 즉시 탑승
         if (CAMPFIRES[targetMap]) {
             const ok = await interactWithLocalCampfire();
             if (!ok) return false;
@@ -518,7 +507,6 @@
             return false;
         }
 
-        // 4. 목표 맵에 캠프파이어가 없다면, 목표 맵과 가장 인접한 캠프파이어 맵으로 웨이포인트 이동 후 포탈 탑승
         let bestTargetCamp = null;
         let bestSubPath = null;
 
@@ -575,7 +563,6 @@
         }
     }
 
-    // 💡 [열림/닫힘 이중 검증] i키 입력 후 실제 인벤토리 오픈 및 클로즈 완벽 검증
     async function checkInventorySlotCount() {
         await ensureLootPanelClosed(1500);
 
@@ -647,16 +634,25 @@
         return count;
     }
 
+    // 💡 최우선 보스(마장기 / 숲길의 두 사슴) 대기열 존재 여부 확인
+    function hasUrgentPriorityBossInQueue() {
+        return bossQueue.some(b => PRIORITY_BOSSES.has(b.index) && !defeatedBosses.has(b.index));
+    }
+
     // 💡 모닥 마을 상점 판매 루틴
     async function visitShopAndSellItems() {
         console.log("\n🏪 [상점 방문] 가까운 캠프파이어를 이용해 모닥 마을 상점으로 이동합니다.");
         await navigateToMap("모닥 마을");
+        if (hasUrgentPriorityBossInQueue()) return;
+
         await ensureMount();
         await glideToTarget(TOWN_SHOP.x, TOWN_SHOP.y, 2.5, 2.0, 8.0);
         await sleep(200);
 
+        if (hasUrgentPriorityBossInQueue()) return;
+
         simulateKey('f');
-        await randomSleep(1000, 1500);
+        await randomSleep(900, 1300);
 
         let sellTabBtn = null;
         const tabStart = Date.now();
@@ -671,7 +667,7 @@
 
         if (sellTabBtn) {
             forceClickElement(sellTabBtn);
-            await randomSleep(600, 900);
+            await randomSleep(500, 800);
         }
 
         const gradeNames = ["노멀", "매직", "레어"];
@@ -683,7 +679,7 @@
             if (btn && !btn.disabled && !btn.hasAttribute('disabled')) {
                 forceClickElement(btn);
                 clickedCount++;
-                await randomSleep(350, 550);
+                await randomSleep(300, 500);
             }
         }
 
@@ -701,13 +697,13 @@
 
             if (selectSellBtn) {
                 forceClickElement(selectSellBtn);
-                await randomSleep(800, 1200);
+                await randomSleep(700, 1000);
 
                 const confirmBtn = document.querySelector('button.is-danger') || 
                                    Array.from(document.querySelectorAll('button')).find(b => b.innerText.trim() === "판매하기");
                 if (confirmBtn) {
                     forceClickElement(confirmBtn);
-                    await randomSleep(1800, 2300);
+                    await randomSleep(1500, 2000);
                 }
             }
         }
@@ -716,6 +712,142 @@
         if (closeBtn) forceClickElement(closeBtn);
         else simulateKey('Escape');
         await sleep(300);
+    }
+
+    // 💡 [신규] 모닥 마을 대장장이 +8 자동 강화 루틴 (최우선 보스 출현 시 즉시 중단 및 이탈)
+    async function visitBlacksmithAndEnhance() {
+        if (hasUrgentPriorityBossInQueue()) return;
+
+        console.log("\n🔨 [대장장이 방문] +8 자동 강화를 위해 대장장이로 이동합니다.");
+        await navigateToMap("모닥 마을");
+        if (hasUrgentPriorityBossInQueue()) return;
+
+        await ensureMount();
+        await glideToTarget(TOWN_BLACKSMITH.x, TOWN_BLACKSMITH.y, 2.3, 1.8, 10.0);
+        await sleep(200);
+
+        if (hasUrgentPriorityBossInQueue()) return;
+
+        const closeReforgePanel = async () => {
+            const closeBtn = document.querySelector('button[aria-label="강화소 닫기"]');
+            if (closeBtn) forceClickElement(closeBtn);
+            else simulateKey('Escape');
+            await sleep(300);
+        };
+
+        // 1. 대장장이 상호작용 (F) 및 자동 강화 탭 열기
+        simulateKey('f');
+        let autoTabBtn = null;
+        const tabWaitStart = Date.now();
+        while (Date.now() - tabWaitStart < 3000) {
+            const tabs = document.querySelectorAll('button[role="tab"]');
+            for (const t of tabs) {
+                if (t.innerText.includes("자동 강화")) {
+                    autoTabBtn = t;
+                    break;
+                }
+            }
+            if (autoTabBtn) break;
+            await sleep(150);
+        }
+
+        if (!autoTabBtn) {
+            console.log("  -> [대장장이 실패] 자동 강화 탭을 찾지 못했습니다.");
+            await closeReforgePanel();
+            return;
+        }
+
+        if (autoTabBtn.getAttribute('aria-selected') !== 'true') {
+            forceClickElement(autoTabBtn);
+            await randomSleep(400, 600);
+        }
+
+        if (hasUrgentPriorityBossInQueue()) {
+            await closeReforgePanel();
+            return;
+        }
+
+        // 2. +8 목표 버튼 선택 확인 (aria-pressed="true"가 아니면 클릭)
+        const targetPlusBtn = Array.from(document.querySelectorAll('button.is-risky')).find(
+            b => b.innerText.replace(/\s+/g, '') === "+8"
+        );
+        if (targetPlusBtn && targetPlusBtn.getAttribute('aria-pressed') !== 'true') {
+            forceClickElement(targetPlusBtn);
+            await randomSleep(300, 450);
+        }
+
+        // 3. 전체 선택 버튼 확인 및 클릭 (.reforge-selection-controls 내 "전체 선택")
+        const selectAllBtn = Array.from(document.querySelectorAll('.reforge-selection-controls button')).find(
+            b => b.innerText.includes("전체 선택")
+        );
+
+        if (!selectAllBtn || selectAllBtn.disabled || selectAllBtn.hasAttribute('disabled')) {
+            console.log("  -> [자동 강화 건너뜀] 강화 가능한 대상 아이템이 없습니다.");
+            await closeReforgePanel();
+            return;
+        }
+
+        forceClickElement(selectAllBtn);
+        await randomSleep(400, 600);
+
+        if (hasUrgentPriorityBossInQueue()) {
+            await closeReforgePanel();
+            return;
+        }
+
+        // 4. 자동 강화 시작 버튼 클릭
+        const getActionBtn = () => document.querySelector('button.reforge-action.reforge-primary-action');
+        const startBtn = getActionBtn();
+
+        if (!startBtn || startBtn.disabled || startBtn.hasAttribute('disabled')) {
+            console.log("  -> [자동 강화 건너뜀] 시작 버튼 비활성 상태");
+            await closeReforgePanel();
+            return;
+        }
+
+        console.log("🔥 [자동 강화 시작] +8 자동 강화를 진행합니다...");
+        forceClickElement(startBtn);
+        await sleep(500);
+
+        // 5. 강화 완료 대기 루프 (버튼이 "중지"에서 다시 "자동 강화 시작"으로 돌아올 때까지 대기)
+        // 단, 마장기(1) 또는 숲길의 두 사슴(10) 출현 시 즉시 중지 후 탈출
+        const enhanceStart = Date.now();
+        let sawRunningState = false;
+
+        while (Date.now() - enhanceStart < 90000) {
+            await sleep(250);
+            const actionBtn = getActionBtn();
+            if (!actionBtn) break;
+
+            const btnText = actionBtn.innerText.trim();
+            const isEnhancing = btnText.includes("중지");
+
+            if (isEnhancing) {
+                sawRunningState = true;
+            }
+
+            // 🚨 최우선 보스(마장기 / 숲길의 두 사슴) 출현 시 즉시 중지 후 강제 탈출
+            if (hasUrgentPriorityBossInQueue()) {
+                console.log("🚨 [긴급 탈출] 최우선 보스 출현 감지! 자동 강화를 즉시 중지하고 출동합니다.");
+                if (isEnhancing) {
+                    forceClickElement(actionBtn); // "중지" 클릭
+                    await sleep(300);
+                }
+                await closeReforgePanel();
+                return;
+            }
+
+            // 완료 판정: "중지" 상태였다가 다시 "자동 강화 시작"으로 돌아왔거나, 시작 후 1초 이상 지났는데 "자동 강화 시작" 상태인 경우
+            if (!isEnhancing && btnText.includes("자동 강화 시작")) {
+                if (sawRunningState || Date.now() - enhanceStart > 1200) {
+                    console.log("✅ [자동 강화 완료] 모든 대상 아이템의 강화가 종료되었습니다.");
+                    break;
+                }
+            }
+        }
+
+        await randomSleep(400, 600);
+        await closeReforgePanel();
     }
 
     function getTownPortalButton() {
@@ -763,10 +895,10 @@
         return false;
     }
 
-    // 💡 [기본 사냥터 복귀 및 인벤토리 분기 실행] (중간 경유지 entryPath 지원)
+    // 💡 [기본 사냥터 복귀 및 인벤토리 분기(판매 -> 강화 -> 보스/사냥터 분기) 실행]
     async function moveToSelectedHuntingGround() {
         const target = HUNTING_GROUNDS.find(g => g.id === selectedHuntingGround) || HUNTING_GROUNDS[0];
-        console.log(`\n🎯 [기본 사냥터 복귀 시작] 대상: '${target.name}' (${target.map})`);
+        console.log(`\n🎯 [복귀 및 정비 체크] 기본 사냥터 대상: '${target.name}' (${target.map})`);
 
         await setAutoHunting(false);
 
@@ -775,11 +907,29 @@
             console.log(`🎒 [인벤토리 검사] 현재 슬롯 사용량: ${slots}/100`);
 
             if (slots >= 50) {
-                console.log("⚠️ [가방 포화] 50칸 이상! 가까운 캠프파이어를 타고 마을 상점으로 이동합니다.");
+                console.log("⚠️ [가방 포화] 50칸 이상! 모닥 마을 상점 판매 및 대장장이 정비를 시작합니다.");
                 await visitShopAndSellItems();
+
+                if (isAutoEnhanceEnabled && !hasUrgentPriorityBossInQueue()) {
+                    await visitBlacksmithAndEnhance();
+                }
+
+                // 정비 완료 후 대기열에 처치되지 않은 예약 보스가 있다면 보스 출동으로 즉시 전환
+                const hasPendingBoss = bossQueue.some(b => !defeatedBosses.has(b.index));
+                if (hasPendingBoss) {
+                    console.log("⚔️ [예약 보스 감지] 정비를 마치고 대기 중인 보스 사냥으로 전환합니다.");
+                    setTimeout(() => executeBossQueueWorker(), 100);
+                    return;
+                }
             } else {
                 console.log("✨ [가방 여유] 마을 방문 없이 최단 경로로 사냥터 직행");
             }
+        }
+
+        // 이동 도중 새 보스가 예약되었다면 사냥터 복귀 중단 후 보스 우선 처리
+        if (bossQueue.some(b => !defeatedBosses.has(b.index))) {
+            setTimeout(() => executeBossQueueWorker(), 100);
+            return;
         }
 
         const mapOk = await navigateToMap(target.map);
@@ -932,7 +1082,7 @@
         isRunning = false;
 
         if (!isHandlingDeath && bossQueue.length === 0) {
-            console.log("  -> [전체 보스 루틴 종료] 기본 사냥터 복귀 루틴을 시작합니다.");
+            console.log("  -> [전체 보스 루틴 종료] 기본 사냥터 복귀 및 정비 루틴을 시작합니다.");
             await returnToDefaultHuntingGround();
         }
     }
@@ -955,7 +1105,7 @@
 
             if (isRunning && !PRIORITY_BOSSES.has(currentBossIndex)) {
                 simulateKey('Escape');
-            } else if (!isRunning && !isHandlingDeath) {
+            } else if (!isRunning && !isReturning && !isHandlingDeath) {
                 executeBossQueueWorker();
             }
             return;
@@ -964,7 +1114,7 @@
         if (!bossQueue.some(b => b.index === bossIndex) && currentBossIndex !== bossIndex) {
             bossQueue.push({ index: bossIndex, name: bossName });
         }
-        if (!isRunning && !isHandlingDeath) executeBossQueueWorker();
+        if (!isRunning && !isReturning && !isHandlingDeath) executeBossQueueWorker();
     }
 
     async function checkAndHandleDeath() {
@@ -1108,7 +1258,7 @@
 
         panel.innerHTML = `
             <div id="bot-header" style="background:rgba(40,40,40,0.95);padding:10px 12px;border-top-left-radius:7px;border-top-right-radius:7px;font-weight:bold;display:flex;justify-content:space-between;align-items:center;cursor:move;border-bottom:1px solid #444;">
-                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v3.87</span>
+                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v3.88</span>
                 <div>
                     <span id="bot-toggle" style="cursor:pointer;font-size:11px;color:#aaa;padding:2px 4px;">[접기]</span>
                 </div>
@@ -1130,6 +1280,12 @@
                     <span style="font-size:12px;font-weight:bold;">상점 자동 판매:</span>
                     <button id="toggle-shop-btn" style="padding:3px 8px;font-size:11px;border-radius:4px;border:none;cursor:pointer;background:${isShopSellEnabled ? '#2e7d32' : '#c62828'};color:#fff;">
                         ${isShopSellEnabled ? 'ON' : 'OFF'}
+                    </button>
+                </div>
+                <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+                    <span style="font-size:12px;font-weight:bold;">자동 강화 (+8):</span>
+                    <button id="toggle-enhance-btn" style="padding:3px 8px;font-size:11px;border-radius:4px;border:none;cursor:pointer;background:${isAutoEnhanceEnabled ? '#2e7d32' : '#c62828'};color:#fff;">
+                        ${isAutoEnhanceEnabled ? 'ON' : 'OFF'}
                     </button>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
@@ -1204,6 +1360,12 @@
             localStorage.setItem('modak_shop_sell_enabled', isShopSellEnabled);
             e.target.style.background = isShopSellEnabled ? '#2e7d32' : '#c62828';
             e.target.innerText = isShopSellEnabled ? 'ON' : 'OFF';
+        };
+        panel.querySelector('#toggle-enhance-btn').onclick = (e) => {
+            isAutoEnhanceEnabled = !isAutoEnhanceEnabled;
+            localStorage.setItem('modak_auto_enhance_enabled', isAutoEnhanceEnabled);
+            e.target.style.background = isAutoEnhanceEnabled ? '#2e7d32' : '#c62828';
+            e.target.innerText = isAutoEnhanceEnabled ? 'ON' : 'OFF';
         };
         panel.querySelector('#start-h').onchange = (e) => {
             bossHuntStartHour = parseInt(e.target.value, 10);
@@ -1291,6 +1453,7 @@
     window.testBossTask = enqueueBossTask;
     window.testMoveHuntingGround = returnToDefaultHuntingGround;
     window.testCheckBag = checkInventorySlotCount;
+    window.testBlacksmith = visitBlacksmithAndEnhance;
 
-    console.log("모닥 온라인 스마트 라우팅 네비게이션 v3.87 로딩 완료!");
+    console.log("모닥 온라인 스마트 라우팅 네비게이션 v3.88 로딩 완료!");
 })();
