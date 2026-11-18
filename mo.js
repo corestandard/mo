@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.88 (Auto Enhance +8 & Priority Interrupt)
+// @name         모닥 온라인 보스 오토봇 v3.90 (Post-Patch All Coordinates Updated)
 // @namespace    http://tampermonkey.net/
-// @version      3.88
+// @version      3.90
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -14,28 +14,28 @@
     // 💡 [전체 캠프파이어 좌표]
     const CAMPFIRES = {
         "모닥 마을": { x: 73.00, y: 194.70, wpIndex: 0 },
-        "망자의 묘지": { x: 561.00, y: 304.50, wpIndex: 1 },
-        "잊혀진 고성 중앙부": { x: 783.00, y: 116.00, wpIndex: 2 },
+        "망자의 묘지": { x: 508.00, y: 280.75, wpIndex: 1 },
+        "잊혀진 고성 중앙부": { x: 756.00, y: 107.25, wpIndex: 2 },
         "뼈바람 협곡": { x: 33.00, y: 432.67, wpIndex: 3 },
         "붉은숲 피난처": { x: -4.50, y: 605.75, wpIndex: 4 }
     };
 
-    const TOWN_SHOP = { x: 42.40, y: 184.74 };
-    const TOWN_BLACKSMITH = { x: 40.78, y: 204.90 }; // 💡 실측 기반 대장장이 좌표
+    const TOWN_SHOP = { x: 32.53, y: 181.21 };
+    const TOWN_BLACKSMITH = { x: 43.22, y: 204.41 };
 
     // 💡 [실측 기반 보스 전투 위치]
     const BOSS_TARGETS = {
-        0: { map: "망국의 기록보관소", x: 669.62, y: 64.92, name: "악몽의 집합체" },
-        1: { map: "망국의 병기창", x: 911.74, y: 198.19, name: "망국의 마장기", entryPath: [{ x: 867.44, y: 175.89 }] },
-        2: { map: "잊혀진 고성 입구", x: 676.55, y: 138.20, name: "망령 공성대장" },
-        3: { map: "망자의 묘지", x: 563.44, y: 211.36, name: "공허의 해골마도사" },
-        4: { map: "초원", x: 270.64, y: 258.64, name: "고대 점액군주" },
-        5: { map: "황야", x: 375.49, y: 336.55, name: "태양가시 거수" },
-        6: { map: "그늘숲", x: -5.14, y: 323.57, name: "스컬 워로드" },
-        7: { map: "협곡 진입로", x: -30.19, y: 399.00, name: "뼈바람 포식자" },
-        8: { map: "수호자의 안식처", x: 37.21, y: 558.92, name: "뒤틀린 태초목" },
-        9: { map: "붉은숲 피난처", x: -72.18, y: 616.09, name: "붉은송곳니 우두머리" },
-        10: { map: "고요한 숲길", x: 133.08, y: 683.38, name: "숲길의 두 사슴" }
+        0: { map: "망국의 기록보관소", x: 637.19, y: 59.93, name: "악몽의 집합체" },
+        1: { map: "망국의 병기창", x: 894.08, y: 179.42, name: "망국의 마장기" },
+        2: { map: "잊혀진 고성 입구", x: 631.97, y: 122.18, name: "망령 공성대장" },
+        3: { map: "망자의 묘지", x: 507.54, y: 193.27, name: "공허의 해골마도사" },
+        4: { map: "초원", x: 271.29, y: 258.51, name: "고대 점액군주" },
+        5: { map: "황야", x: 382.67, y: 335.82, name: "태양가시 거수" },
+        6: { map: "그늘숲", x: 11.32, y: 326.19, name: "스컬 워로드" },
+        7: { map: "협곡 진입로", x: -28.04, y: 400.46, name: "뼈바람 포식자" },
+        8: { map: "수호자의 안식처", x: 45.31, y: 557.36, name: "뒤틀린 태초목" },
+        9: { map: "붉은숲 피난처", x: -70.86, y: 618.30, name: "붉은송곳니 우두머리" },
+        10: { map: "고요한 숲길", x: 127.50, y: 682.48, name: "숲길의 두 사슴" }
     };
 
     // 💡 [최우선 긴급 출동 보스 목록] (1: 망국의 마장기, 10: 숲길의 두 사슴)
@@ -43,72 +43,72 @@
 
     // 💡 [기본 사냥터 실측 위치]
     const HUNTING_GROUNDS = [
-        { id: "wasteland_1", name: "황야1 (큰거 - 선인장 액기스)", map: "황야", x: 428.85, y: 291.00 },
-        { id: "wasteland_2", name: "황야2 (작은거 - 선인장 액기스)", map: "황야", x: 349.09, y: 290.61 },
-        { id: "canyon_entry", name: "협곡 진입로 (피울음 가죽갑옷)", map: "협곡 진입로", x: -28.44, y: 394.10 },
-        { id: "bone_canyon", name: "뼈바람 협곡 (강철비 화살통, 혈석 반지)", map: "뼈바람 협곡", x: 61.13, y: 455.27 },
-        { id: "bone_canyon_2", name: "뼈바람 협곡2 (강철비 화살통, 혈석 반지)", map: "뼈바람 협곡", entryPath: [{ x: 3.94, y: 433.45 }], x: -27.93, y: 462.34 },
-        { id: "archive", name: "망국의 기록 보관소 (잊히지 않은 기도)", map: "망국의 기록보관소", x: 700.23, y: 47.21 },
-        { id: "castle_center_east", name: "잊혀진 고성 중앙부_동쪽 (추격의 반지)", map: "잊혀진 고성 중앙부", x: 858.13, y: 114.99 },
-        { id: "castle_center_west", name: "잊혀진 고성 중앙부_서쪽 (추격의 반지)", map: "잊혀진 고성 중앙부", x: 696.95, y: 114.46 },
-        { id: "castle_center_south", name: "잊혀진 고성 중앙부_남쪽 (추격의 반지)", map: "잊혀진 고성 중앙부", x: 783.05, y: 153.89 },
-        { id: "castle_center_north", name: "잊혀진 고성 중앙부_북쪽 (추격의 반지)", map: "잊혀진 고성 중앙부", x: 780.01, y: 78.05 },
-        { id: "shade_forest_11", name: "그늘숲 11시 (오크의 전투나팔)", map: "그늘숲", x: 38.35, y: 311.38 },
-        { id: "shade_forest_3", name: "그늘숲 3시 (오크의 전투나팔)", map: "그늘숲", x: 139.18, y: 331.48 }
+        { id: "wasteland_1", name: "황야1 (큰거 - 선인장 액기스)", map: "황야", x: 456.79, y: 294.49 },
+        { id: "wasteland_2", name: "황야2 (작은거 - 선인장 액기스)", map: "황야", x: 390.16, y: 257.89 },
+        { id: "canyon_entry", name: "협곡 진입로 (피울음 가죽갑옷)", map: "협곡 진입로", x: -26.91, y: 399.82 },
+        { id: "bone_canyon", name: "뼈바람 협곡 (강철비 화살통, 혈석 반지)", map: "뼈바람 협곡", x: 56.67, y: 452.38 },
+        { id: "bone_canyon_2", name: "뼈바람 협곡2 (강철비 화살통, 혈석 반지)", map: "뼈바람 협곡", entryPath: [{ x: 10.55, y: 447.72 }], x: -24.39, y: 464.18 },
+        { id: "archive", name: "망국의 기록 보관소 (잊히지 않은 기도)", map: "망국의 기록보관소", x: 668.43, y: 44.19 },
+        { id: "castle_center_east", name: "잊혀진 고성 중앙부_동쪽 (추격의 반지)", map: "잊혀진 고성 중앙부", x: 838.02, y: 107.28 },
+        { id: "castle_center_west", name: "잊혀진 고성 중앙부_서쪽 (추격의 반지)", map: "잊혀진 고성 중앙부", x: 664.47, y: 107.39 },
+        { id: "castle_center_south", name: "잊혀진 고성 중앙부_남쪽 (추격의 반지)", map: "잊혀진 고성 중앙부", x: 755.23, y: 144.00 },
+        { id: "castle_center_north", name: "잊혀진 고성 중앙부_북쪽 (추격의 반지)", map: "잊혀진 고성 중앙부", x: 756.16, y: 65.20 },
+        { id: "shade_forest_11", name: "그늘숲 11시 (오크의 전투나팔)", map: "그늘숲", x: 41.99, y: 312.38 },
+        { id: "shade_forest_3", name: "그늘숲 3시 (오크의 전투나팔)", map: "그늘숲", x: 124.13, y: 331.56 }
     ];
 
     // 💡 [월드맵 맵 간 연결 그래프 데이터]
     const MAP_EDGES = {
         "모닥 마을": [
-            { to: "초원", portal: { x: 121.60, y: 218.42 } }
+            { to: "초원", portal: { x: 125.43, y: 222.57 } }
         ],
         "초원": [
-            { to: "모닥 마을", portal: { x: 136.51, y: 234.65 } },
-            { to: "그늘숲", portal: { x: 107.04, y: 270.50 } },
-            { to: "황야", portal: { x: 242.69, y: 285.56 } }
+            { to: "모닥 마을", portal: { x: 142.80, y: 235.07 } },
+            { to: "그늘숲", portal: { x: 112.44, y: 273.75 } },
+            { to: "황야", portal: { x: 247.12, y: 288.89 } }
         ],
         "황야": [
-            { to: "초원", portal: { x: 273.07, y: 291.00 } },
-            { to: "망자의 묘지", portal: { x: 476.91, y: 292.01 } }
+            { to: "초원", portal: { x: 278.65, y: 294.80 } },
+            { to: "망자의 묘지", portal: { x: 435.56, y: 269.04 } }
         ],
         "망자의 묘지": [
-            { to: "황야", portal: { x: 512.98, y: 287.69 } },
-            { to: "잊혀진 고성 입구", portal: { x: 611.46, y: 231.74 } }
+            { to: "황야", portal: { x: 456.92, y: 260.22 } },
+            { to: "잊혀진 고성 입구", portal: { x: 558.36, y: 207.16 } }
         ],
         "잊혀진 고성 입구": [
-            { to: "망자의 묘지", portal: { x: 625.01, y: 216.63 } },
-            { to: "잊혀진 고성 중앙부", portal: { x: 729.80, y: 163.28 } }
+            { to: "망자의 묘지", portal: { x: 578.98, y: 197.53 } },
+            { to: "잊혀진 고성 중앙부", portal: { x: 685.39, y: 144.09 } }
         ],
         "잊혀진 고성 중앙부": [
-            { to: "잊혀진 고성 입구", portal: { x: 736.21, y: 140.12 } },
-            { to: "망국의 병기창", portal: { x: 825.89, y: 137.35 } },
-            { to: "망국의 기록보관소", portal: { x: 733.03, y: 91.28 } }
+            { to: "잊혀진 고성 입구", portal: { x: 702.80, y: 134.99 } },
+            { to: "망국의 병기창", portal: { x: 805.00, y: 132.80 } },
+            { to: "망국의 기록보관소", portal: { x: 701.86, y: 81.54 } }
         ],
         "망국의 병기창": [
-            { to: "잊혀진 고성 중앙부", portal: { x: 899.13, y: 141.24 }, waypoints: [{ x: 867.44, y: 175.89 }] }
+            { to: "잊혀진 고성 중앙부", portal: { x: 861.52, y: 127.07 } }
         ],
         "망국의 기록보관소": [
-            { to: "잊혀진 고성 중앙부", portal: { x: 687.38, y: 74.65 } }
+            { to: "잊혀진 고성 중앙부", portal: { x: 654.92, y: 74.00 } }
         ],
         "뼈바람 협곡": [
-            { to: "협곡 진입로", portal: { x: 3.94, y: 433.45 } }
+            { to: "협곡 진입로", portal: { x: 1.59, y: 434.62 } }
         ],
         "협곡 진입로": [
-            { to: "뼈바람 협곡", portal: { x: -11.66, y: 424.02 } },
-            { to: "그늘숲", portal: { x: 3.57, y: 366.65 } }
+            { to: "뼈바람 협곡", portal: { x: -13.71, y: 423.46 } },
+            { to: "그늘숲", portal: { x: 4.23, y: 363.77 } }
         ],
         "그늘숲": [
-            { to: "협곡 진입로", portal: { x: 15.36, y: 355.78 } }
+            { to: "협곡 진입로", portal: { x: 13.01, y: 355.61 } }
         ],
         "붉은숲 피난처": [
-            { to: "수호자의 안식처", portal: { x: 62.15, y: 594.78 } },
-            { to: "고요한 숲길", portal: { x: 35.46, y: 658.50 } }
+            { to: "수호자의 안식처", portal: { x: 58.76, y: 595.75 } },
+            { to: "고요한 숲길", portal: { x: 35.06, y: 660.16 } }
         ],
         "수호자의 안식처": [
-            { to: "붉은숲 피난처", portal: { x: 70.13, y: 584.31 } }
+            { to: "붉은숲 피난처", portal: { x: 71.37, y: 583.74 } }
         ],
         "고요한 숲길": [
-            { to: "붉은숲 피난처", portal: { x: 50.61, y: 670.04 } }
+            { to: "붉은숲 피난처", portal: { x: 51.72, y: 670.36 } }
         ]
     };
 
@@ -634,7 +634,6 @@
         return count;
     }
 
-    // 💡 최우선 보스(마장기 / 숲길의 두 사슴) 대기열 존재 여부 확인
     function hasUrgentPriorityBossInQueue() {
         return bossQueue.some(b => PRIORITY_BOSSES.has(b.index) && !defeatedBosses.has(b.index));
     }
@@ -642,7 +641,11 @@
     // 💡 모닥 마을 상점 판매 루틴
     async function visitShopAndSellItems() {
         console.log("\n🏪 [상점 방문] 가까운 캠프파이어를 이용해 모닥 마을 상점으로 이동합니다.");
-        await navigateToMap("모닥 마을");
+        const inTown = await navigateToMap("모닥 마을");
+        if (!inTown) {
+            console.log("  -> [상점 건너뜀] 모닥 마을 이동 실패");
+            return;
+        }
         if (hasUrgentPriorityBossInQueue()) return;
 
         await ensureMount();
@@ -714,12 +717,16 @@
         await sleep(300);
     }
 
-    // 💡 [신규] 모닥 마을 대장장이 +8 자동 강화 루틴 (최우선 보스 출현 시 즉시 중단 및 이탈)
+    // 💡 모닥 마을 대장장이 +8 자동 강화 루틴
     async function visitBlacksmithAndEnhance() {
         if (hasUrgentPriorityBossInQueue()) return;
 
         console.log("\n🔨 [대장장이 방문] +8 자동 강화를 위해 대장장이로 이동합니다.");
-        await navigateToMap("모닥 마을");
+        const inTown = await navigateToMap("모닥 마을");
+        if (!inTown) {
+            console.log("  -> [대장장이 건너뜀] 모닥 마을 이동 실패");
+            return;
+        }
         if (hasUrgentPriorityBossInQueue()) return;
 
         await ensureMount();
@@ -735,7 +742,6 @@
             await sleep(300);
         };
 
-        // 1. 대장장이 상호작용 (F) 및 자동 강화 탭 열기
         simulateKey('f');
         let autoTabBtn = null;
         const tabWaitStart = Date.now();
@@ -767,7 +773,6 @@
             return;
         }
 
-        // 2. +8 목표 버튼 선택 확인 (aria-pressed="true"가 아니면 클릭)
         const targetPlusBtn = Array.from(document.querySelectorAll('button.is-risky')).find(
             b => b.innerText.replace(/\s+/g, '') === "+8"
         );
@@ -776,7 +781,6 @@
             await randomSleep(300, 450);
         }
 
-        // 3. 전체 선택 버튼 확인 및 클릭 (.reforge-selection-controls 내 "전체 선택")
         const selectAllBtn = Array.from(document.querySelectorAll('.reforge-selection-controls button')).find(
             b => b.innerText.includes("전체 선택")
         );
@@ -795,7 +799,6 @@
             return;
         }
 
-        // 4. 자동 강화 시작 버튼 클릭
         const getActionBtn = () => document.querySelector('button.reforge-action.reforge-primary-action');
         const startBtn = getActionBtn();
 
@@ -809,8 +812,6 @@
         forceClickElement(startBtn);
         await sleep(500);
 
-        // 5. 강화 완료 대기 루프 (버튼이 "중지"에서 다시 "자동 강화 시작"으로 돌아올 때까지 대기)
-        // 단, 마장기(1) 또는 숲길의 두 사슴(10) 출현 시 즉시 중지 후 탈출
         const enhanceStart = Date.now();
         let sawRunningState = false;
 
@@ -826,18 +827,16 @@
                 sawRunningState = true;
             }
 
-            // 🚨 최우선 보스(마장기 / 숲길의 두 사슴) 출현 시 즉시 중지 후 강제 탈출
             if (hasUrgentPriorityBossInQueue()) {
                 console.log("🚨 [긴급 탈출] 최우선 보스 출현 감지! 자동 강화를 즉시 중지하고 출동합니다.");
                 if (isEnhancing) {
-                    forceClickElement(actionBtn); // "중지" 클릭
+                    forceClickElement(actionBtn);
                     await sleep(300);
                 }
                 await closeReforgePanel();
                 return;
             }
 
-            // 완료 판정: "중지" 상태였다가 다시 "자동 강화 시작"으로 돌아왔거나, 시작 후 1초 이상 지났는데 "자동 강화 시작" 상태인 경우
             if (!isEnhancing && btnText.includes("자동 강화 시작")) {
                 if (sawRunningState || Date.now() - enhanceStart > 1200) {
                     console.log("✅ [자동 강화 완료] 모든 대상 아이템의 강화가 종료되었습니다.");
@@ -895,7 +894,7 @@
         return false;
     }
 
-    // 💡 [기본 사냥터 복귀 및 인벤토리 분기(판매 -> 강화 -> 보스/사냥터 분기) 실행]
+    // 💡 [기본 사냥터 복귀 및 인벤토리 분기 실행]
     async function moveToSelectedHuntingGround() {
         const target = HUNTING_GROUNDS.find(g => g.id === selectedHuntingGround) || HUNTING_GROUNDS[0];
         console.log(`\n🎯 [복귀 및 정비 체크] 기본 사냥터 대상: '${target.name}' (${target.map})`);
@@ -914,7 +913,6 @@
                     await visitBlacksmithAndEnhance();
                 }
 
-                // 정비 완료 후 대기열에 처치되지 않은 예약 보스가 있다면 보스 출동으로 즉시 전환
                 const hasPendingBoss = bossQueue.some(b => !defeatedBosses.has(b.index));
                 if (hasPendingBoss) {
                     console.log("⚔️ [예약 보스 감지] 정비를 마치고 대기 중인 보스 사냥으로 전환합니다.");
@@ -926,15 +924,25 @@
             }
         }
 
-        // 이동 도중 새 보스가 예약되었다면 사냥터 복귀 중단 후 보스 우선 처리
         if (bossQueue.some(b => !defeatedBosses.has(b.index))) {
             setTimeout(() => executeBossQueueWorker(), 100);
             return;
         }
 
-        const mapOk = await navigateToMap(target.map);
+        let mapOk = await navigateToMap(target.map);
         if (!mapOk) {
-            console.log("  -> [실패] 사냥터 맵 진입 실패");
+            console.log("  -> [사냥터 이동 실패] 마을 귀환 후 기본 사냥터 이동을 1회 재시도합니다.");
+            await smartReturnTown();
+
+            if (bossQueue.some(b => !defeatedBosses.has(b.index))) {
+                setTimeout(() => executeBossQueueWorker(), 100);
+                return;
+            }
+            mapOk = await navigateToMap(target.map);
+        }
+
+        if (!mapOk) {
+            console.log("  -> [실패] 사냥터 맵 최종 진입 실패");
             return;
         }
 
@@ -1032,11 +1040,12 @@
             if (isHandlingDeath) break;
 
             let currentTarget = currentBossIndex !== -1 
-                ? { index: currentBossIndex, name: BOSS_TARGETS[currentBossIndex]?.name || "보스" } 
+                ? { index: currentBossIndex, name: BOSS_TARGETS[currentBossIndex]?.name || "보스", retries: 0 } 
                 : bossQueue.shift();
 
             const bossIndex = currentTarget.index;
             const targetInfo = BOSS_TARGETS[bossIndex];
+            const retryCount = currentTarget.retries || 0;
 
             if (defeatedBosses.has(bossIndex)) {
                 currentBossIndex = -1;
@@ -1045,8 +1054,9 @@
 
             currentBossIndex = bossIndex;
             let interruptedByPriority = false;
+            let navFailed = false;
 
-            console.log(`\n=== [보스 출동] [${bossIndex}] ${targetInfo.name} ===`);
+            console.log(`\n=== [보스 출동] [${bossIndex}] ${targetInfo.name} ${retryCount > 0 ? `(귀환 재시도 ${retryCount}/2)` : ''} ===`);
 
             try {
                 await setAutoHunting(false);
@@ -1063,12 +1073,37 @@
                     if (res === "urgent_switch") {
                         interruptedByPriority = true;
                     }
+                } else {
+                    navFailed = true;
                 }
             } catch (e) {
                 console.log("  -> [출동 오류]", e);
+                navFailed = true;
             }
 
             if (isHandlingDeath) break;
+
+            if (navFailed) {
+                if (!defeatedBosses.has(bossIndex) && retryCount < 2) {
+                    console.log(`  -> [출동 실패: 미처치] '${targetInfo.name}' 처치 미확인! 마을 귀환 후 재출동합니다. (${retryCount + 1}/2)`);
+                    await smartReturnTown();
+
+                    if (!defeatedBosses.has(bossIndex)) {
+                        const retryTask = { index: bossIndex, name: targetInfo.name, retries: retryCount + 1 };
+                        const firstNonPrio = bossQueue.findIndex(b => !PRIORITY_BOSSES.has(b.index));
+                        if (firstNonPrio === -1) bossQueue.push(retryTask);
+                        else bossQueue.splice(firstNonPrio, 0, retryTask);
+                    }
+                } else {
+                    console.log(`  -> [출동 종료] '${targetInfo.name}' 처치 확인 또는 재시도 한도 초과. 다음 일정을 확인합니다.`);
+                    if (bossQueue.some(b => !defeatedBosses.has(b.index))) {
+                        await smartReturnTown();
+                    }
+                }
+                currentBossIndex = -1;
+                await sleep(300);
+                continue;
+            }
 
             if (interruptedByPriority && !defeatedBosses.has(bossIndex)) {
                 const insertPos = bossQueue.findIndex(b => !PRIORITY_BOSSES.has(b.index));
@@ -1082,7 +1117,7 @@
         isRunning = false;
 
         if (!isHandlingDeath && bossQueue.length === 0) {
-            console.log("  -> [전체 보스 루틴 종료] 기본 사냥터 복귀 및 정비 루틴을 시작합니다.");
+            console.log("  -> [전체 보스 루틴 종료] 예약 보스가 없으므로 기본 사냥터 복귀 및 정비 루틴을 시작합니다.");
             await returnToDefaultHuntingGround();
         }
     }
@@ -1100,8 +1135,8 @@
             if (idx !== -1) bossQueue.splice(idx, 1);
 
             const firstNonPriorityIdx = bossQueue.findIndex(b => !PRIORITY_BOSSES.has(b.index));
-            if (firstNonPriorityIdx === -1) bossQueue.push({ index: bossIndex, name: bossName });
-            else bossQueue.splice(firstNonPriorityIdx, 0, { index: bossIndex, name: bossName });
+            if (firstNonPriorityIdx === -1) bossQueue.push({ index: bossIndex, name: bossName, retries: 0 });
+            else bossQueue.splice(firstNonPriorityIdx, 0, { index: bossIndex, name: bossName, retries: 0 });
 
             if (isRunning && !PRIORITY_BOSSES.has(currentBossIndex)) {
                 simulateKey('Escape');
@@ -1112,7 +1147,7 @@
         }
 
         if (!bossQueue.some(b => b.index === bossIndex) && currentBossIndex !== bossIndex) {
-            bossQueue.push({ index: bossIndex, name: bossName });
+            bossQueue.push({ index: bossIndex, name: bossName, retries: 0 });
         }
         if (!isRunning && !isReturning && !isHandlingDeath) executeBossQueueWorker();
     }
@@ -1258,7 +1293,7 @@
 
         panel.innerHTML = `
             <div id="bot-header" style="background:rgba(40,40,40,0.95);padding:10px 12px;border-top-left-radius:7px;border-top-right-radius:7px;font-weight:bold;display:flex;justify-content:space-between;align-items:center;cursor:move;border-bottom:1px solid #444;">
-                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v3.88</span>
+                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v3.90</span>
                 <div>
                     <span id="bot-toggle" style="cursor:pointer;font-size:11px;color:#aaa;padding:2px 4px;">[접기]</span>
                 </div>
@@ -1455,5 +1490,5 @@
     window.testCheckBag = checkInventorySlotCount;
     window.testBlacksmith = visitBlacksmithAndEnhance;
 
-    console.log("모닥 온라인 스마트 라우팅 네비게이션 v3.88 로딩 완료!");
+    console.log("모닥 온라인 스마트 라우팅 네비게이션 v3.90 로딩 완료!");
 })();
