@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.90 (Post-Patch All Coordinates Updated)
+// @name         모닥 온라인 보스 오토봇 v3.91 (Custom Hunting Ground & Map Name Fix)
 // @namespace    http://tampermonkey.net/
-// @version      3.90
+// @version      3.91
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -41,8 +41,8 @@
     // 💡 [최우선 긴급 출동 보스 목록] (1: 망국의 마장기, 10: 숲길의 두 사슴)
     const PRIORITY_BOSSES = new Set([1, 10]);
 
-    // 💡 [기본 사냥터 실측 위치]
-    const HUNTING_GROUNDS = [
+    // 💡 [기본 내장 사냥터 실측 위치]
+    const DEFAULT_HUNTING_GROUNDS = [
         { id: "wasteland_1", name: "황야1 (큰거 - 선인장 액기스)", map: "황야", x: 456.79, y: 294.49 },
         { id: "wasteland_2", name: "황야2 (작은거 - 선인장 액기스)", map: "황야", x: 390.16, y: 257.89 },
         { id: "canyon_entry", name: "협곡 진입로 (피울음 가죽갑옷)", map: "협곡 진입로", x: -26.91, y: 399.82 },
@@ -56,6 +56,24 @@
         { id: "shade_forest_11", name: "그늘숲 11시 (오크의 전투나팔)", map: "그늘숲", x: 41.99, y: 312.38 },
         { id: "shade_forest_3", name: "그늘숲 3시 (오크의 전투나팔)", map: "그늘숲", x: 124.13, y: 331.56 }
     ];
+
+    // 💡 사용자 커스텀 사냥터 로드/저장 및 통합 목록 반환
+    function loadCustomHuntingGrounds() {
+        try {
+            const raw = localStorage.getItem('modak_custom_grounds');
+            return raw ? JSON.parse(raw) : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function saveCustomHuntingGrounds(list) {
+        localStorage.setItem('modak_custom_grounds', JSON.stringify(list));
+    }
+
+    function getAllHuntingGrounds() {
+        return [...DEFAULT_HUNTING_GROUNDS, ...loadCustomHuntingGrounds()];
+    }
 
     // 💡 [월드맵 맵 간 연결 그래프 데이터]
     const MAP_EDGES = {
@@ -146,9 +164,11 @@
         return { x: calibratedX, y: calibratedY };
     }
 
+    // 💡 시즌 괄호 표기 제거 (예: '모닥 마을(겨울)' -> '모닥 마을')
     function getCurrentMapName() {
         const mapNameEl = document.getElementsByClassName("panel-list-name")[0];
-        return mapNameEl ? mapNameEl.innerText.trim() : "";
+        if (!mapNameEl) return "";
+        return mapNameEl.innerText.replace(/\(.*?\)/g, '').trim();
     }
 
     async function waitForMap(expectedName, timeoutSec = 15) {
@@ -702,7 +722,7 @@
                 forceClickElement(selectSellBtn);
                 await randomSleep(700, 1000);
 
-                const confirmBtn = document.querySelector('button.is-danger') || 
+                const confirmBtn = document.querySelector('button.is-danger') ||
                                    Array.from(document.querySelectorAll('button')).find(b => b.innerText.trim() === "판매하기");
                 if (confirmBtn) {
                     forceClickElement(confirmBtn);
@@ -896,7 +916,8 @@
 
     // 💡 [기본 사냥터 복귀 및 인벤토리 분기 실행]
     async function moveToSelectedHuntingGround() {
-        const target = HUNTING_GROUNDS.find(g => g.id === selectedHuntingGround) || HUNTING_GROUNDS[0];
+        const allGrounds = getAllHuntingGrounds();
+        const target = allGrounds.find(g => g.id === selectedHuntingGround) || allGrounds[0];
         console.log(`\n🎯 [복귀 및 정비 체크] 기본 사냥터 대상: '${target.name}' (${target.map})`);
 
         await setAutoHunting(false);
@@ -1039,8 +1060,8 @@
         while (bossQueue.length > 0 || currentBossIndex !== -1) {
             if (isHandlingDeath) break;
 
-            let currentTarget = currentBossIndex !== -1 
-                ? { index: currentBossIndex, name: BOSS_TARGETS[currentBossIndex]?.name || "보스", retries: 0 } 
+            let currentTarget = currentBossIndex !== -1
+                ? { index: currentBossIndex, name: BOSS_TARGETS[currentBossIndex]?.name || "보스", retries: 0 }
                 : bossQueue.shift();
 
             const bossIndex = currentTarget.index;
@@ -1250,7 +1271,7 @@
         };
     }
 
-    // 💡 설정 UI (드래그 이동 및 위치 저장)
+    // 💡 설정 UI (커스텀 사냥터 현재 위치 추가 / 이름 수정 / 삭제 지원)
     function createSettingsUI() {
         if (document.getElementById('modak-bot-settings-ui')) return;
         const panel = document.createElement('div');
@@ -1270,7 +1291,7 @@
             z-index: 99999;
             background: rgba(20, 20, 20, 0.92);
             color: #fff;
-            width: 290px;
+            width: 295px;
             border-radius: 8px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.6);
             font-family: sans-serif;
@@ -1287,13 +1308,9 @@
             endH += `<option value="${h}" ${bossHuntEndHour === h ? 'selected' : ''}>${lbl}</option>`;
         }
 
-        const groundsHTML = HUNTING_GROUNDS.map(g => 
-            `<option value="${g.id}" ${selectedHuntingGround === g.id ? 'selected' : ''}>${g.name}</option>`
-        ).join('');
-
         panel.innerHTML = `
             <div id="bot-header" style="background:rgba(40,40,40,0.95);padding:10px 12px;border-top-left-radius:7px;border-top-right-radius:7px;font-weight:bold;display:flex;justify-content:space-between;align-items:center;cursor:move;border-bottom:1px solid #444;">
-                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v3.90</span>
+                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v3.91</span>
                 <div>
                     <span id="bot-toggle" style="cursor:pointer;font-size:11px;color:#aaa;padding:2px 4px;">[접기]</span>
                 </div>
@@ -1332,14 +1349,124 @@
                     </div>
                 </div>
                 <div style="border-top:1px solid rgba(255,255,255,0.1);padding-top:8px;">
-                    <div style="font-size:12px;font-weight:bold;margin-bottom:4px;">기본 사냥터 선택:</div>
-                    <select id="ground-select" style="width:100%;padding:5px;background:#333;color:#fff;border:1px solid #555;border-radius:4px;font-size:12px;cursor:pointer;">
-                        ${groundsHTML}
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+                        <span style="font-size:12px;font-weight:bold;">기본 사냥터 선택:</span>
+                        <button id="add-ground-btn" style="padding:2px 7px;font-size:11px;border-radius:4px;border:1px solid #4caf50;cursor:pointer;background:#1b5e20;color:#fff;" title="현재 서 있는 맵과 좌표를 기본 사냥터로 추가">
+                            + 현재 위치
+                        </button>
+                    </div>
+                    <select id="ground-select" style="width:100%;padding:5px;background:#333;color:#fff;border:1px solid #555;border-radius:4px;font-size:12px;cursor:pointer;margin-bottom:6px;">
                     </select>
+                    <div id="custom-ground-controls" style="display:none;justify-content:flex-end;gap:5px;">
+                        <button id="rename-ground-btn" style="padding:2px 8px;font-size:11px;border-radius:4px;border:1px solid #666;cursor:pointer;background:#37474f;color:#eee;">
+                            이름 수정
+                        </button>
+                        <button id="delete-ground-btn" style="padding:2px 8px;font-size:11px;border-radius:4px;border:1px solid #8e2424;cursor:pointer;background:#5c1a1a;color:#ffcdd2;">
+                            삭제
+                        </button>
+                    </div>
                 </div>
             </div>
         `;
         document.body.appendChild(panel);
+
+        const groundSelectEl = panel.querySelector('#ground-select');
+        const customControlsEl = panel.querySelector('#custom-ground-controls');
+
+        const renderGroundOptions = () => {
+            const defaultsHTML = DEFAULT_HUNTING_GROUNDS.map(g =>
+                `<option value="${g.id}" ${selectedHuntingGround === g.id ? 'selected' : ''}>${g.name}</option>`
+            ).join('');
+
+            const customs = loadCustomHuntingGrounds();
+            const customsHTML = customs.length > 0
+                ? `<optgroup label="★ 내 저장 사냥터">` + customs.map(g =>
+                    `<option value="${g.id}" ${selectedHuntingGround === g.id ? 'selected' : ''}>${g.name}</option>`
+                ).join('') + `</optgroup>`
+                : '';
+
+            groundSelectEl.innerHTML = defaultsHTML + customsHTML;
+
+            // 선택된 항목이 유효하지 않으면 첫 번째 기본 사냥터로 복구
+            if (!getAllHuntingGrounds().some(g => g.id === selectedHuntingGround)) {
+                selectedHuntingGround = DEFAULT_HUNTING_GROUNDS[0].id;
+                localStorage.setItem('modak_default_ground', selectedHuntingGround);
+                groundSelectEl.value = selectedHuntingGround;
+            }
+
+            // 커스텀 사냥터가 선택된 경우에만 [이름 수정] / [삭제] 버튼 표시
+            const isCustomSelected = customs.some(g => g.id === selectedHuntingGround);
+            customControlsEl.style.display = isCustomSelected ? 'flex' : 'none';
+        };
+
+        renderGroundOptions();
+
+        // [+ 현재 위치] 버튼 클릭: 현재 맵 + 보정 좌표를 커스텀 사냥터로 저장
+        panel.querySelector('#add-ground-btn').onclick = () => {
+            const mapName = getCurrentMapName();
+            const pos = getCoords();
+            if (!mapName || !pos) {
+                alert("현재 맵 또는 좌표를 읽을 수 없습니다.");
+                return;
+            }
+
+            const rx = Number(pos.x.toFixed(2));
+            const ry = Number(pos.y.toFixed(2));
+            const defaultLabel = `${mapName} (${rx}, ${ry})`;
+            const inputName = prompt(`현재 위치를 기본 사냥터에 추가합니다.\n맵: ${mapName} / 좌표: (${rx}, ${ry})\n\n저장할 사냥터 이름을 입력하세요:`, defaultLabel);
+
+            if (inputName === null) return; // 취소
+            const finalName = inputName.trim() || defaultLabel;
+
+            const newId = `custom_${Date.now()}`;
+            const customs = loadCustomHuntingGrounds();
+            customs.push({
+                id: newId,
+                name: finalName,
+                map: mapName,
+                x: rx,
+                y: ry
+            });
+            saveCustomHuntingGrounds(customs);
+
+            selectedHuntingGround = newId;
+            localStorage.setItem('modak_default_ground', selectedHuntingGround);
+            renderGroundOptions();
+            console.log(`✅ [커스텀 사냥터 추가] '${finalName}' (${mapName}: ${rx}, ${ry})`);
+        };
+
+        // [이름 수정] 버튼 클릭
+        panel.querySelector('#rename-ground-btn').onclick = () => {
+            const customs = loadCustomHuntingGrounds();
+            const target = customs.find(g => g.id === selectedHuntingGround);
+            if (!target) return;
+
+            const newName = prompt(`사냥터 이름을 수정합니다.\n(${target.map}: ${target.x}, ${target.y})`, target.name);
+            if (newName === null) return;
+            const trimmed = newName.trim();
+            if (!trimmed) return;
+
+            target.name = trimmed;
+            saveCustomHuntingGrounds(customs);
+            renderGroundOptions();
+            console.log(`✏️ [사냥터 이름 수정] '${trimmed}'`);
+        };
+
+        // [삭제] 버튼 클릭
+        panel.querySelector('#delete-ground-btn').onclick = () => {
+            const customs = loadCustomHuntingGrounds();
+            const target = customs.find(g => g.id === selectedHuntingGround);
+            if (!target) return;
+
+            if (!confirm(`저장된 사냥터 '${target.name}'을(를) 삭제하시겠습니까?`)) return;
+
+            const updated = customs.filter(g => g.id !== selectedHuntingGround);
+            saveCustomHuntingGrounds(updated);
+            selectedHuntingGround = DEFAULT_HUNTING_GROUNDS[0].id;
+            localStorage.setItem('modak_default_ground', selectedHuntingGround);
+            renderGroundOptions();
+            console.log(`🗑️ [커스텀 사냥터 삭제] '${target.name}' 삭제 완료`);
+        };
 
         const header = panel.querySelector('#bot-header');
         let isDragging = false;
@@ -1411,11 +1538,11 @@
             localStorage.setItem('modak_boss_end_hour', bossHuntEndHour);
         };
 
-        const groundSelectEl = panel.querySelector('#ground-select');
         groundSelectEl.addEventListener('click', () => window.focus());
         groundSelectEl.onchange = (e) => {
             selectedHuntingGround = e.target.value;
             localStorage.setItem('modak_default_ground', selectedHuntingGround);
+            renderGroundOptions();
             console.log(`[사냥터 설정] '${selectedHuntingGround}'(으)로 변경 완료`);
             groundSelectEl.blur();
         };
@@ -1490,5 +1617,5 @@
     window.testCheckBag = checkInventorySlotCount;
     window.testBlacksmith = visitBlacksmithAndEnhance;
 
-    console.log("모닥 온라인 스마트 라우팅 네비게이션 v3.90 로딩 완료!");
+    console.log("모닥 온라인 스마트 라우팅 네비게이션 v3.91 로딩 완료!");
 })();
