@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.93 (Original Coords Rollback + Graveyard Portal Fix)
+// @name         모닥 온라인 보스 오토봇 v3.97 (Direct Portal Routing + Full Map Graph)
 // @namespace    http://tampermonkey.net/
-// @version      3.93
+// @version      3.97
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -11,50 +11,50 @@
 (function() {
     'use strict';
 
-    // 💡 [전체 캠프파이어 좌표 - 기존 좌표 복원]
+    // 💡 [전체 캠프파이어 좌표]
     const CAMPFIRES = {
         "모닥 마을": { x: 73.00, y: 194.70, wpIndex: 0 },
-        "망자의 묘지": { x: 561.00, y: 304.50, wpIndex: 1 },
-        "잊혀진 고성 중앙부": { x: 783.00, y: 116.00, wpIndex: 2 },
+        "망자의 묘지": { x: 508.00, y: 280.75, wpIndex: 1 },
+        "잊혀진 고성 중앙부": { x: 756.00, y: 107.25, wpIndex: 2 },
         "뼈바람 협곡": { x: 33.00, y: 432.67, wpIndex: 3 },
         "붉은숲 피난처": { x: -4.50, y: 605.75, wpIndex: 4 }
     };
 
-    const TOWN_SHOP = { x: 42.40, y: 184.74 };
-    const TOWN_BLACKSMITH = { x: 40.78, y: 204.90 };
+    const TOWN_SHOP = { x: 32.53, y: 181.21 };
+    const TOWN_BLACKSMITH = { x: 43.22, y: 204.41 };
 
-    // 💡 [실측 기반 보스 전투 위치 - 기존 좌표 복원]
+    // 💡 [실측 기반 보스 전투 위치]
     const BOSS_TARGETS = {
-        0: { map: "망국의 기록보관소", x: 669.62, y: 64.92, name: "악몽의 집합체" },
-        1: { map: "망국의 병기창", x: 911.74, y: 198.19, name: "망국의 마장기", entryPath: [{ x: 867.44, y: 175.89 }] },
-        2: { map: "잊혀진 고성 입구", x: 676.55, y: 138.20, name: "망령 공성대장" },
-        3: { map: "망자의 묘지", x: 563.44, y: 211.36, name: "공허의 해골마도사" },
-        4: { map: "초원", x: 270.64, y: 258.64, name: "고대 점액군주" },
-        5: { map: "황야", x: 375.49, y: 336.55, name: "태양가시 거수" },
-        6: { map: "그늘숲", x: -5.14, y: 323.57, name: "스컬 워로드" },
-        7: { map: "협곡 진입로", x: -30.19, y: 399.00, name: "뼈바람 포식자" },
-        8: { map: "수호자의 안식처", x: 37.21, y: 558.92, name: "뒤틀린 태초목" },
-        9: { map: "붉은숲 피난처", x: -72.18, y: 616.09, name: "붉은송곳니 우두머리" },
-        10: { map: "고요한 숲길", x: 133.08, y: 683.38, name: "숲길의 두 사슴" }
+        0: { map: "망국의 기록보관소", x: 637.19, y: 59.93, name: "악몽의 집합체" },
+        1: { map: "망국의 병기창", entryPath: [{ x: 829.33, y: 167.58 }], x: 894.08, y: 179.42, name: "망국의 마장기" },
+        2: { map: "잊혀진 고성 입구", x: 631.97, y: 122.18, name: "망령 공성대장" },
+        3: { map: "망자의 묘지", x: 507.54, y: 193.27, name: "공허의 해골마도사" },
+        4: { map: "초원", x: 271.29, y: 258.51, name: "고대 점액군주" },
+        5: { map: "황야", x: 382.67, y: 335.82, name: "태양가시 거수" },
+        6: { map: "그늘숲", x: -2.06, y: 324.96, name: "스컬 워로드" },
+        7: { map: "협곡 진입로", x: -28.04, y: 400.46, name: "뼈바람 포식자" },
+        8: { map: "수호자의 안식처", x: 45.31, y: 557.36, name: "뒤틀린 태초목" },
+        9: { map: "붉은숲 피난처", x: -70.86, y: 618.30, name: "붉은송곳니 우두머리" },
+        10: { map: "고요한 숲길", x: 127.50, y: 682.48, name: "숲길의 두 사슴" }
     };
 
     // 💡 [최우선 긴급 출동 보스 목록] (1: 망국의 마장기, 10: 숲길의 두 사슴)
     const PRIORITY_BOSSES = new Set([1, 10]);
 
-    // 💡 [기본 내장 사냥터 실측 위치 - 기존 좌표 복원]
+    // 💡 [기본 내장 사냥터 실측 위치]
     const DEFAULT_HUNTING_GROUNDS = [
-        { id: "wasteland_1", name: "황야1 (큰거 - 선인장 액기스)", map: "황야", x: 428.85, y: 291.00 },
-        { id: "wasteland_2", name: "황야2 (작은거 - 선인장 액기스)", map: "황야", x: 349.09, y: 290.61 },
-        { id: "canyon_entry", name: "협곡 진입로 (피울음 가죽갑옷)", map: "협곡 진입로", x: -28.44, y: 394.10 },
-        { id: "bone_canyon", name: "뼈바람 협곡 (강철비 화살통, 혈석 반지)", map: "뼈바람 협곡", x: 61.13, y: 455.27 },
-        { id: "bone_canyon_2", name: "뼈바람 협곡2 (강철비 화살통, 혈석 반지)", map: "뼈바람 협곡", entryPath: [{ x: 3.94, y: 433.45 }], x: -27.93, y: 462.34 },
-        { id: "archive", name: "망국의 기록 보관소 (잊히지 않은 기도)", map: "망국의 기록보관소", x: 700.23, y: 47.21 },
-        { id: "castle_center_east", name: "잊혀진 고성 중앙부_동쪽 (추격의 반지)", map: "잊혀진 고성 중앙부", x: 858.13, y: 114.99 },
-        { id: "castle_center_west", name: "잊혀진 고성 중앙부_서쪽 (추격의 반지)", map: "잊혀진 고성 중앙부", x: 696.95, y: 114.46 },
-        { id: "castle_center_south", name: "잊혀진 고성 중앙부_남쪽 (추격의 반지)", map: "잊혀진 고성 중앙부", x: 783.05, y: 153.89 },
-        { id: "castle_center_north", name: "잊혀진 고성 중앙부_북쪽 (추격의 반지)", map: "잊혀진 고성 중앙부", x: 780.01, y: 78.05 },
-        { id: "shade_forest_11", name: "그늘숲 11시 (오크의 전투나팔)", map: "그늘숲", x: 38.35, y: 311.38 },
-        { id: "shade_forest_3", name: "그늘숲 3시 (오크의 전투나팔)", map: "그늘숲", x: 139.18, y: 331.48 }
+        { id: "wasteland_1", name: "황야1 (큰거 - 선인장 액기스)", map: "황야", x: 456.79, y: 294.49 },
+        { id: "wasteland_2", name: "황야2 (작은거 - 선인장 액기스)", map: "황야", x: 390.16, y: 257.89 },
+        { id: "canyon_entry", name: "협곡 진입로 (피울음 가죽갑옷)", map: "협곡 진입로", x: -26.91, y: 399.82 },
+        { id: "bone_canyon", name: "뼈바람 협곡 (강철비 화살통, 혈석 반지)", map: "뼈바람 협곡", x: 56.67, y: 452.38 },
+        { id: "bone_canyon_2", name: "뼈바람 협곡2 (강철비 화살통, 혈석 반지)", map: "뼈바람 협곡", entryPath: [{ x: 10.55, y: 447.72 }], x: -24.39, y: 464.18 },
+        { id: "archive", name: "망국의 기록 보관소 (잊히지 않은 기도)", map: "망국의 기록보관소", x: 668.43, y: 44.19 },
+        { id: "castle_center_east", name: "잊혀진 고성 중앙부_동쪽 (추격의 반지)", map: "잊혀진 고성 중앙부", x: 838.02, y: 107.28 },
+        { id: "castle_center_west", name: "잊혀진 고성 중앙부_서쪽 (추격의 반지)", map: "잊혀진 고성 중앙부", x: 664.47, y: 107.39 },
+        { id: "castle_center_south", name: "잊혀진 고성 중앙부_남쪽 (추격의 반지)", map: "잊혀진 고성 중앙부", x: 755.23, y: 144.00 },
+        { id: "castle_center_north", name: "잊혀진 고성 중앙부_북쪽 (추격의 반지)", map: "잊혀진 고성 중앙부", x: 756.16, y: 65.20 },
+        { id: "shade_forest_11", name: "그늘숲 11시 (오크의 전투나팔)", map: "그늘숲", x: 41.99, y: 312.38 },
+        { id: "shade_forest_3", name: "그늘숲 3시 (오크의 전투나팔)", map: "그늘숲", x: 124.13, y: 331.56 }
     ];
 
     // 💡 사용자 커스텀 사냥터 로드/저장 및 통합 목록 반환
@@ -75,58 +75,61 @@
         return [...DEFAULT_HUNTING_GROUNDS, ...loadCustomHuntingGrounds()];
     }
 
-    // 💡 [월드맵 맵 간 연결 그래프 데이터 - 황야->망자의 묘지만 수정 유지, 나머지 복원]
+    // 💡 [월드맵 맵 간 연결 그래프 데이터 - 전 맵 순환 연결 완료]
     const MAP_EDGES = {
         "모닥 마을": [
-            { to: "초원", portal: { x: 121.60, y: 218.42 } }
+            { to: "초원", portal: { x: 125.43, y: 222.57 } }
         ],
         "초원": [
-            { to: "모닥 마을", portal: { x: 136.51, y: 234.65 } },
-            { to: "그늘숲", portal: { x: 107.04, y: 270.50 } },
-            { to: "황야", portal: { x: 242.69, y: 285.56 } }
+            { to: "모닥 마을", portal: { x: 142.80, y: 235.07 } },
+            { to: "그늘숲", portal: { x: 112.44, y: 273.75 } },
+            { to: "황야", portal: { x: 247.12, y: 288.89 } }
         ],
         "황야": [
-            { to: "초원", portal: { x: 273.07, y: 291.00 } },
-            { to: "망자의 묘지", portal: { x: 436.50, y: 269.07 } } // 💡 수정된 좌표 유지
+            { to: "초원", portal: { x: 278.65, y: 294.80 } },
+            { to: "망자의 묘지", portal: { x: 435.56, y: 269.04 } }
         ],
         "망자의 묘지": [
-            { to: "황야", portal: { x: 512.98, y: 287.69 } },
-            { to: "잊혀진 고성 입구", portal: { x: 611.46, y: 231.74 } }
+            { to: "황야", portal: { x: 456.92, y: 260.22 } },
+            { to: "잊혀진 고성 입구", portal: { x: 558.36, y: 207.16 } }
         ],
         "잊혀진 고성 입구": [
-            { to: "망자의 묘지", portal: { x: 625.01, y: 216.63 } },
-            { to: "잊혀진 고성 중앙부", portal: { x: 729.80, y: 163.28 } }
+            { to: "망자의 묘지", portal: { x: 578.98, y: 197.53 } },
+            { to: "잊혀진 고성 중앙부", portal: { x: 685.39, y: 144.09 } }
         ],
         "잊혀진 고성 중앙부": [
-            { to: "잊혀진 고성 입구", portal: { x: 736.21, y: 140.12 } },
-            { to: "망국의 병기창", portal: { x: 825.89, y: 137.35 } },
-            { to: "망국의 기록보관소", portal: { x: 733.03, y: 91.28 } }
+            { to: "잊혀진 고성 입구", portal: { x: 702.80, y: 134.99 } },
+            { to: "망국의 병기창", portal: { x: 805.00, y: 132.80 } },
+            { to: "망국의 기록보관소", portal: { x: 701.86, y: 81.54 } }
         ],
         "망국의 병기창": [
-            { to: "잊혀진 고성 중앙부", portal: { x: 899.13, y: 141.24 }, waypoints: [{ x: 867.44, y: 175.89 }] }
+            { to: "잊혀진 고성 중앙부", portal: { x: 861.52, y: 127.07 }, waypoints: [{ x: 829.33, y: 167.58 }] }
         ],
         "망국의 기록보관소": [
-            { to: "잊혀진 고성 중앙부", portal: { x: 687.38, y: 74.65 } }
+            { to: "잊혀진 고성 중앙부", portal: { x: 654.92, y: 74.00 } }
         ],
         "뼈바람 협곡": [
-            { to: "협곡 진입로", portal: { x: 3.94, y: 433.45 } }
+            { to: "협곡 진입로", portal: { x: 1.59, y: 434.62 } },
+            { to: "수호자의 안식처", portal: { x: 43.36, y: 513.63 } }
         ],
         "협곡 진입로": [
-            { to: "뼈바람 협곡", portal: { x: -11.66, y: 424.02 } },
-            { to: "그늘숲", portal: { x: 3.57, y: 366.65 } }
+            { to: "뼈바람 협곡", portal: { x: -13.71, y: 423.46 } },
+            { to: "그늘숲", portal: { x: 4.23, y: 363.77 } }
         ],
         "그늘숲": [
-            { to: "협곡 진입로", portal: { x: 15.36, y: 355.78 } }
+            { to: "초원", portal: { x: 95.92, y: 287.17 } },
+            { to: "협곡 진입로", portal: { x: 13.01, y: 355.61 } }
         ],
         "붉은숲 피난처": [
-            { to: "수호자의 안식처", portal: { x: 62.15, y: 594.78 } },
-            { to: "고요한 숲길", portal: { x: 35.46, y: 658.50 } }
+            { to: "수호자의 안식처", portal: { x: 58.76, y: 595.75 } },
+            { to: "고요한 숲길", portal: { x: 35.06, y: 660.16 } }
         ],
         "수호자의 안식처": [
-            { to: "붉은숲 피난처", portal: { x: 70.13, y: 584.31 } }
+            { to: "뼈바람 협곡", portal: { x: 105.43, y: 526.17 } },
+            { to: "붉은숲 피난처", portal: { x: 71.37, y: 583.74 } }
         ],
         "고요한 숲길": [
-            { to: "붉은숲 피난처", portal: { x: 50.61, y: 670.04 } }
+            { to: "붉은숲 피난처", portal: { x: 51.72, y: 670.36 } }
         ]
     };
 
@@ -134,6 +137,7 @@
     let isBossHuntingEnabled = localStorage.getItem('modak_boss_hunt_enabled') !== 'false';
     let isShopSellEnabled = localStorage.getItem('modak_shop_sell_enabled') !== 'false';
     let isAutoEnhanceEnabled = localStorage.getItem('modak_auto_enhance_enabled') !== 'false';
+    let autoEnhanceTargetLevel = parseInt(localStorage.getItem('modak_auto_enhance_level') ?? '8', 10);
     let bossHuntStartHour = parseInt(localStorage.getItem('modak_boss_start_hour') ?? '0', 10);
     let bossHuntEndHour = parseInt(localStorage.getItem('modak_boss_end_hour') ?? '24', 10);
 
@@ -471,6 +475,7 @@
         return false;
     }
 
+    // 💡 [스마트 라우팅 엔진 - 포탈 직행(2회 이하) vs 캠프파이어 워프 비용 비교]
     async function navigateToMap(targetMap) {
         await setAutoHunting(false);
 
@@ -481,8 +486,46 @@
 
         const walkPath = findPathBetweenMaps(curMap, targetMap);
 
-        if (walkPath && walkPath.length <= 1) {
-            console.log(`  -> [인접 포탈 직행] 포탈 ${walkPath.length}회 경유로 이동합니다.`);
+        // 1) 출발 캠프파이어 후보 탐색 (현재 맵에 캠프파이어가 있으면 비용 0)
+        let bestStartCamp = null;
+        let pathToStartCamp = null;
+        if (CAMPFIRES[curMap]) {
+            bestStartCamp = curMap;
+            pathToStartCamp = [];
+        } else {
+            for (const campMap of Object.keys(CAMPFIRES)) {
+                const p = findPathBetweenMaps(curMap, campMap);
+                if (p && (!pathToStartCamp || p.length < pathToStartCamp.length)) {
+                    pathToStartCamp = p;
+                    bestStartCamp = campMap;
+                }
+            }
+        }
+
+        // 2) 도착 캠프파이어 후보 탐색 (목적지에 캠프파이어가 있으면 비용 0)
+        let bestTargetCamp = null;
+        let pathFromTargetCamp = null;
+        if (CAMPFIRES[targetMap]) {
+            bestTargetCamp = targetMap;
+            pathFromTargetCamp = [];
+        } else {
+            for (const campMap of Object.keys(CAMPFIRES)) {
+                const p = findPathBetweenMaps(campMap, targetMap);
+                if (p && (!pathFromTargetCamp || p.length < pathFromTargetCamp.length)) {
+                    pathFromTargetCamp = p;
+                    bestTargetCamp = campMap;
+                }
+            }
+        }
+
+        // 3) 도보 직행 비용 vs 캠프파이어 워프 총 비용 비교 (워프 1회 = 포탈 약 1.2회 비용)
+        const walkCost = walkPath ? walkPath.length : Infinity;
+        const warpCost = (pathToStartCamp && pathFromTargetCamp)
+            ? (pathToStartCamp.length + 1.2 + pathFromTargetCamp.length)
+            : Infinity;
+
+        if (walkPath && (walkPath.length <= 2 || walkCost <= warpCost)) {
+            console.log(`  -> [포탈 직행] 캠프파이어 없이 포탈 ${walkPath.length}회 경유로 최단 이동합니다.`);
             for (const step of walkPath) {
                 const ok = await traversePortalStep(step);
                 if (!ok) return false;
@@ -490,52 +533,18 @@
             return true;
         }
 
-        if (!CAMPFIRES[curMap]) {
-            console.log(`  -> 현재 맵('${curMap}')에 캠프파이어 없음. 캠프파이어 보유 맵으로 이동합니다.`);
-            let bestPath = null;
-
-            for (const campMap of Object.keys(CAMPFIRES)) {
-                const p = findPathBetweenMaps(curMap, campMap);
-                if (p && (!bestPath || p.length < bestPath.length)) {
-                    bestPath = p;
-                }
+        // 4) 워프가 더 빠른 원거리인 경우 캠프파이어 경유 실행
+        console.log(`  -> [캠프파이어 워프] 원거리 이동 (도보 ${walkCost}회 vs 워프 경로)`);
+        if (pathToStartCamp) {
+            for (const step of pathToStartCamp) {
+                const ok = await traversePortalStep(step);
+                if (!ok) return false;
             }
-
-            if (bestPath) {
-                for (const step of bestPath) {
-                    const ok = await traversePortalStep(step);
-                    if (!ok) return false;
-                }
-                curMap = getCurrentMapName();
-            } else {
-                console.log("  -> 캠프파이어 보유 맵 연결 실패. 비상 마을 귀환(B) 실행");
-                await smartReturnTown();
-                curMap = getCurrentMapName();
-            }
-        }
-
-        if (CAMPFIRES[targetMap]) {
-            const ok = await interactWithLocalCampfire();
-            if (!ok) return false;
-
-            const dests = document.getElementsByClassName("waypoint-destination");
-            const wpIdx = CAMPFIRES[targetMap].wpIndex;
-            if (dests && dests[wpIdx]) {
-                dests[wpIdx].click();
-                return await waitForMap(targetMap, 15);
-            }
-            return false;
-        }
-
-        let bestTargetCamp = null;
-        let bestSubPath = null;
-
-        for (const campMap of Object.keys(CAMPFIRES)) {
-            const p = findPathBetweenMaps(campMap, targetMap);
-            if (p && (!bestSubPath || p.length < bestSubPath.length)) {
-                bestSubPath = p;
-                bestTargetCamp = campMap;
-            }
+            curMap = getCurrentMapName();
+        } else {
+            console.log("  -> 캠프파이어 보유 맵 연결 실패. 비상 마을 귀환(B) 실행");
+            await smartReturnTown();
+            curMap = getCurrentMapName();
         }
 
         if (bestTargetCamp) {
@@ -549,10 +558,12 @@
                     dests[wpIdx].click();
                     const transOk = await waitForMap(bestTargetCamp, 15);
                     if (!transOk) return false;
+                } else {
+                    return false;
                 }
             }
 
-            for (const step of bestSubPath) {
+            for (const step of pathFromTargetCamp) {
                 const ok = await traversePortalStep(step);
                 if (!ok) return false;
             }
@@ -722,7 +733,7 @@
                 forceClickElement(selectSellBtn);
                 await randomSleep(700, 1000);
 
-                const confirmBtn = document.querySelector('button.is-danger') || 
+                const confirmBtn = document.querySelector('button.is-danger') ||
                                    Array.from(document.querySelectorAll('button')).find(b => b.innerText.trim() === "판매하기");
                 if (confirmBtn) {
                     forceClickElement(confirmBtn);
@@ -737,11 +748,12 @@
         await sleep(300);
     }
 
-    // 💡 모닥 마을 대장장이 +8 자동 강화 루틴
+    // 💡 모닥 마을 대장장이 +1~+9 선택형 자동 강화 루틴
     async function visitBlacksmithAndEnhance() {
         if (hasUrgentPriorityBossInQueue()) return;
 
-        console.log("\n🔨 [대장장이 방문] +8 자동 강화를 위해 대장장이로 이동합니다.");
+        const targetLabel = `+${autoEnhanceTargetLevel}`;
+        console.log(`\n🔨 [대장장이 방문] ${targetLabel} 자동 강화를 위해 대장장이로 이동합니다.`);
         const inTown = await navigateToMap("모닥 마을");
         if (!inTown) {
             console.log("  -> [대장장이 건너뜀] 모닥 마을 이동 실패");
@@ -793,8 +805,8 @@
             return;
         }
 
-        const targetPlusBtn = Array.from(document.querySelectorAll('button.is-risky')).find(
-            b => b.innerText.replace(/\s+/g, '') === "+8"
+        const targetPlusBtn = Array.from(document.querySelectorAll('.reforge-targets button, button[type="button"]')).find(
+            b => b.innerText.replace(/\s+/g, '') === targetLabel
         );
         if (targetPlusBtn && targetPlusBtn.getAttribute('aria-pressed') !== 'true') {
             forceClickElement(targetPlusBtn);
@@ -806,7 +818,7 @@
         );
 
         if (!selectAllBtn || selectAllBtn.disabled || selectAllBtn.hasAttribute('disabled')) {
-            console.log("  -> [자동 강화 건너뜀] 강화 가능한 대상 아이템이 없습니다.");
+            console.log(`  -> [자동 강화 건너뜀] ${targetLabel} 강화 가능한 대상 아이템이 없습니다.`);
             await closeReforgePanel();
             return;
         }
@@ -828,7 +840,7 @@
             return;
         }
 
-        console.log("🔥 [자동 강화 시작] +8 자동 강화를 진행합니다...");
+        console.log(`🔥 [자동 강화 시작] ${targetLabel} 자동 강화를 진행합니다...`);
         forceClickElement(startBtn);
         await sleep(500);
 
@@ -859,7 +871,7 @@
 
             if (!isEnhancing && btnText.includes("자동 강화 시작")) {
                 if (sawRunningState || Date.now() - enhanceStart > 1200) {
-                    console.log("✅ [자동 강화 완료] 모든 대상 아이템의 강화가 종료되었습니다.");
+                    console.log(`✅ [자동 강화 완료] 모든 대상 아이템의 ${targetLabel} 강화가 종료되었습니다.`);
                     break;
                 }
             }
@@ -914,7 +926,7 @@
         return false;
     }
 
-    // 💡 [기본 사냥터 복귀 및 인벤토리 분기 실행] (예약 보스 즉시 감지 및 전환 강화)
+    // 💡 [기본 사냥터 복귀 및 인벤토리 분기 실행]
     async function moveToSelectedHuntingGround() {
         const allGrounds = getAllHuntingGrounds();
         const target = allGrounds.find(g => g.id === selectedHuntingGround) || allGrounds[0];
@@ -1063,8 +1075,8 @@
         while (bossQueue.length > 0 || currentBossIndex !== -1) {
             if (isHandlingDeath) break;
 
-            let currentTarget = currentBossIndex !== -1 
-                ? { index: currentBossIndex, name: BOSS_TARGETS[currentBossIndex]?.name || "보스", retries: 0 } 
+            let currentTarget = currentBossIndex !== -1
+                ? { index: currentBossIndex, name: BOSS_TARGETS[currentBossIndex]?.name || "보스", retries: 0 }
                 : bossQueue.shift();
 
             const bossIndex = currentTarget.index;
@@ -1276,7 +1288,7 @@
         };
     }
 
-    // 💡 설정 UI (커스텀 사냥터 현재 위치 추가 / 이름 수정 / 삭제 지원)
+    // 💡 설정 UI (+1~+9 강화 목표 선택 드롭다운 포함)
     function createSettingsUI() {
         if (document.getElementById('modak-bot-settings-ui')) return;
         const panel = document.createElement('div');
@@ -1313,9 +1325,14 @@
             endH += `<option value="${h}" ${bossHuntEndHour === h ? 'selected' : ''}>${lbl}</option>`;
         }
 
+        let enhanceOptionsHTML = '';
+        for (let lv = 1; lv <= 9; lv++) {
+            enhanceOptionsHTML += `<option value="${lv}" ${autoEnhanceTargetLevel === lv ? 'selected' : ''}>+${lv}</option>`;
+        }
+
         panel.innerHTML = `
             <div id="bot-header" style="background:rgba(40,40,40,0.95);padding:10px 12px;border-top-left-radius:7px;border-top-right-radius:7px;font-weight:bold;display:flex;justify-content:space-between;align-items:center;cursor:move;border-bottom:1px solid #444;">
-                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v3.93</span>
+                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v3.97</span>
                 <div>
                     <span id="bot-toggle" style="cursor:pointer;font-size:11px;color:#aaa;padding:2px 4px;">[접기]</span>
                 </div>
@@ -1339,11 +1356,16 @@
                         ${isShopSellEnabled ? 'ON' : 'OFF'}
                     </button>
                 </div>
-                <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-                    <span style="font-size:12px;font-weight:bold;">자동 강화 (+8):</span>
-                    <button id="toggle-enhance-btn" style="padding:3px 8px;font-size:11px;border-radius:4px;border:none;cursor:pointer;background:${isAutoEnhanceEnabled ? '#2e7d32' : '#c62828'};color:#fff;">
-                        ${isAutoEnhanceEnabled ? 'ON' : 'OFF'}
-                    </button>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <span style="font-size:12px;font-weight:bold;">자동 강화 목표:</span>
+                    <div style="display:flex;align-items:center;gap:4px;">
+                        <select id="enhance-level-select" style="padding:2px 4px;background:#333;color:#fff;border:1px solid #555;border-radius:4px;font-size:11px;cursor:pointer;">
+                            ${enhanceOptionsHTML}
+                        </select>
+                        <button id="toggle-enhance-btn" style="padding:3px 8px;font-size:11px;border-radius:4px;border:none;cursor:pointer;background:${isAutoEnhanceEnabled ? '#2e7d32' : '#c62828'};color:#fff;">
+                            ${isAutoEnhanceEnabled ? 'ON' : 'OFF'}
+                        </button>
+                    </div>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
                     <span style="font-size:12px;font-weight:bold;">사냥 시간대:</span>
@@ -1523,6 +1545,14 @@
             e.target.style.background = isShopSellEnabled ? '#2e7d32' : '#c62828';
             e.target.innerText = isShopSellEnabled ? 'ON' : 'OFF';
         };
+        const enhanceSelectEl = panel.querySelector('#enhance-level-select');
+        enhanceSelectEl.addEventListener('click', () => window.focus());
+        enhanceSelectEl.onchange = (e) => {
+            autoEnhanceTargetLevel = parseInt(e.target.value, 10);
+            localStorage.setItem('modak_auto_enhance_level', autoEnhanceTargetLevel);
+            console.log(`[자동 강화 설정] 목표 수치 '+${autoEnhanceTargetLevel}'(으)로 변경 완료`);
+            enhanceSelectEl.blur();
+        };
         panel.querySelector('#toggle-enhance-btn').onclick = (e) => {
             isAutoEnhanceEnabled = !isAutoEnhanceEnabled;
             localStorage.setItem('modak_auto_enhance_enabled', isAutoEnhanceEnabled);
@@ -1617,5 +1647,5 @@
     window.testCheckBag = checkInventorySlotCount;
     window.testBlacksmith = visitBlacksmithAndEnhance;
 
-    console.log("모닥 온라인 스마트 라우팅 네비게이션 v3.93 로딩 완료!");
+    console.log("모닥 온라인 스마트 라우팅 네비게이션 v3.97 로딩 완료!");
 })();
