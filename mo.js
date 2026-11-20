@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v3.97 (Direct Portal Routing + Full Map Graph)
+// @name         모닥 온라인 보스 오토봇 v4.00 (Periodic Inventory Check & Fixed Map Edges)
 // @namespace    http://tampermonkey.net/
-// @version      3.97
+// @version      4.00
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -75,7 +75,7 @@
         return [...DEFAULT_HUNTING_GROUNDS, ...loadCustomHuntingGrounds()];
     }
 
-    // 💡 [월드맵 맵 간 연결 그래프 데이터 - 전 맵 순환 연결 완료]
+    // 💡 [월드맵 맵 간 연결 그래프 데이터]
     const MAP_EDGES = {
         "모닥 마을": [
             { to: "초원", portal: { x: 125.43, y: 222.57 } }
@@ -109,8 +109,7 @@
             { to: "잊혀진 고성 중앙부", portal: { x: 654.92, y: 74.00 } }
         ],
         "뼈바람 협곡": [
-            { to: "협곡 진입로", portal: { x: 1.59, y: 434.62 } },
-            //{ to: "수호자의 안식처", portal: { x: 43.36, y: 513.63 } }
+            { to: "협곡 진입로", portal: { x: 1.59, y: 434.62 } }
         ],
         "협곡 진입로": [
             { to: "뼈바람 협곡", portal: { x: -13.71, y: 423.46 } },
@@ -125,7 +124,6 @@
             { to: "고요한 숲길", portal: { x: 35.06, y: 660.16 } }
         ],
         "수호자의 안식처": [
-            //{ to: "뼈바람 협곡", portal: { x: 105.43, y: 526.17 } },
             { to: "붉은숲 피난처", portal: { x: 71.37, y: 583.74 } }
         ],
         "고요한 숲길": [
@@ -133,13 +131,32 @@
         ]
     };
 
+    // 💡 상점 판매 등급 설정 로드/저장
+    const ALL_SELL_GRADES = ["노멀", "매직", "레어"];
+    function loadSellGrades() {
+        try {
+            const raw = localStorage.getItem('modak_shop_sell_grades');
+            if (!raw) return ["노멀", "매직", "레어"];
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : ["노멀", "매직", "레어"];
+        } catch (e) {
+            return ["노멀", "매직", "레어"];
+        }
+    }
+
     let selectedHuntingGround = localStorage.getItem('modak_default_ground') || "wasteland_1";
     let isBossHuntingEnabled = localStorage.getItem('modak_boss_hunt_enabled') !== 'false';
     let isShopSellEnabled = localStorage.getItem('modak_shop_sell_enabled') !== 'false';
+    let shopSellSlotThreshold = parseInt(localStorage.getItem('modak_shop_slot_threshold') ?? '50', 10);
+    let shopCheckIntervalMin = parseInt(localStorage.getItem('modak_shop_check_interval') ?? '30', 10);
+    let shopSellGrades = loadSellGrades();
+    let isExcludeRareGlovesBoots = localStorage.getItem('modak_shop_exclude_gloves_boots') !== 'false';
     let isAutoEnhanceEnabled = localStorage.getItem('modak_auto_enhance_enabled') !== 'false';
     let autoEnhanceTargetLevel = parseInt(localStorage.getItem('modak_auto_enhance_level') ?? '8', 10);
     let bossHuntStartHour = parseInt(localStorage.getItem('modak_boss_start_hour') ?? '0', 10);
     let bossHuntEndHour = parseInt(localStorage.getItem('modak_boss_end_hour') ?? '24', 10);
+
+    let lastInventoryCheckTime = Date.now();
 
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     const randomSleep = (minMs, maxMs) => new Promise(r => setTimeout(r, Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs));
@@ -486,7 +503,6 @@
 
         const walkPath = findPathBetweenMaps(curMap, targetMap);
 
-        // 1) 출발 캠프파이어 후보 탐색 (현재 맵에 캠프파이어가 있으면 비용 0)
         let bestStartCamp = null;
         let pathToStartCamp = null;
         if (CAMPFIRES[curMap]) {
@@ -502,7 +518,6 @@
             }
         }
 
-        // 2) 도착 캠프파이어 후보 탐색 (목적지에 캠프파이어가 있으면 비용 0)
         let bestTargetCamp = null;
         let pathFromTargetCamp = null;
         if (CAMPFIRES[targetMap]) {
@@ -518,7 +533,6 @@
             }
         }
 
-        // 3) 도보 직행 비용 vs 캠프파이어 워프 총 비용 비교 (워프 1회 = 포탈 약 1.2회 비용)
         const walkCost = walkPath ? walkPath.length : Infinity;
         const warpCost = (pathToStartCamp && pathFromTargetCamp)
             ? (pathToStartCamp.length + 1.2 + pathFromTargetCamp.length)
@@ -533,7 +547,6 @@
             return true;
         }
 
-        // 4) 워프가 더 빠른 원거리인 경우 캠프파이어 경유 실행
         console.log(`  -> [캠프파이어 워프] 원거리 이동 (도보 ${walkCost}회 vs 워프 경로)`);
         if (pathToStartCamp) {
             for (const step of pathToStartCamp) {
@@ -662,6 +675,7 @@
             }
         }
 
+        lastInventoryCheckTime = Date.now();
         return count;
     }
 
@@ -669,9 +683,19 @@
         return bossQueue.some(b => PRIORITY_BOSSES.has(b.index) && !defeatedBosses.has(b.index));
     }
 
-    // 💡 모닥 마을 상점 판매 루틴
+    // 💡 모닥 마을 상점 판매 루틴 (UI 선택 등급 + 레어 장갑·장화 제외 파생 옵션 반영)
     async function visitShopAndSellItems() {
-        console.log("\n🏪 [상점 방문] 가까운 캠프파이어를 이용해 모닥 마을 상점으로 이동합니다.");
+        if (shopSellGrades.length === 0) {
+            console.log("\n🏪 [상점 건너뜀] 선택된 판매 등급이 없습니다.");
+            return;
+        }
+
+        const rareDesc = shopSellGrades.includes("레어")
+            ? (isExcludeRareGlovesBoots ? "레어(장갑·장화 제외)" : "레어(전체)")
+            : "";
+        const displayGrades = shopSellGrades.map(g => g === "레어" ? rareDesc : g).join(', ');
+
+        console.log(`\n🏪 [상점 방문] 선택 등급(${displayGrades}) 판매를 위해 모닥 마을 상점으로 이동합니다.`);
         const inTown = await navigateToMap("모닥 마을");
         if (!inTown) {
             console.log("  -> [상점 건너뜀] 모닥 마을 이동 실패");
@@ -704,16 +728,35 @@
             await randomSleep(500, 800);
         }
 
-        const gradeNames = ["노멀", "매직", "레어"];
         let clickedCount = 0;
         const shopButtons = Array.from(document.querySelectorAll('button[type="button"]'));
 
-        for (const name of gradeNames) {
-            const btn = shopButtons.find(b => b.innerText.trim() === name);
-            if (btn && !btn.disabled && !btn.hasAttribute('disabled')) {
-                forceClickElement(btn);
-                clickedCount++;
-                await randomSleep(300, 500);
+        for (const name of shopSellGrades) {
+            if (name === "레어" && isExcludeRareGlovesBoots) {
+                const rareSlots = Array.from(
+                    document.querySelectorAll('.shop-item-grid button.inventory-slot.has-item.rarity-rare')
+                );
+                let excludedCount = 0;
+                for (const slot of rareSlots) {
+                    const itemName = slot.getAttribute('aria-label') || '';
+                    if (itemName.includes("장갑") || itemName.includes("장화")) {
+                        excludedCount++;
+                        continue;
+                    }
+                    if (slot.getAttribute('aria-checked') !== 'true') {
+                        forceClickElement(slot);
+                        clickedCount++;
+                        await randomSleep(80, 150);
+                    }
+                }
+                console.log(`  -> [레어 필터링] 일반 레어 선택 완료 (장갑·장화 ${excludedCount}개 제외)`);
+            } else {
+                const btn = shopButtons.find(b => b.innerText.trim() === name);
+                if (btn && !btn.disabled && !btn.hasAttribute('disabled')) {
+                    forceClickElement(btn);
+                    clickedCount++;
+                    await randomSleep(300, 500);
+                }
             }
         }
 
@@ -936,10 +979,10 @@
 
         if (isShopSellEnabled) {
             const slots = await checkInventorySlotCount();
-            console.log(`🎒 [인벤토리 검사] 현재 슬롯 사용량: ${slots}/100`);
+            console.log(`🎒 [인벤토리 검사] 현재 슬롯 사용량: ${slots}/100 (판매 기준: ${shopSellSlotThreshold}칸 이상)`);
 
-            if (slots >= 50) {
-                console.log("⚠️ [가방 포화] 50칸 이상! 모닥 마을 상점 판매 및 대장장이 정비를 시작합니다.");
+            if (slots >= shopSellSlotThreshold) {
+                console.log(`⚠️ [가방 포화] ${shopSellSlotThreshold}칸 이상! 모닥 마을 상점 판매 및 대장장이 정비를 시작합니다.`);
                 await visitShopAndSellItems();
 
                 if (isAutoEnhanceEnabled && !hasUrgentPriorityBossInQueue()) {
@@ -1005,6 +1048,20 @@
             }
         }
     }
+
+    // 💡 [정기 인벤토리 체크 백그라운드 타이머] (15초마다 유휴 상태 확인 후 실행)
+    setInterval(async () => {
+        if (!isShopSellEnabled || shopCheckIntervalMin <= 0) return;
+        if (isRunning || isReturning || isHandlingDeath) return;
+        if (bossQueue.some(b => !defeatedBosses.has(b.index))) return;
+
+        const elapsedMs = Date.now() - lastInventoryCheckTime;
+        if (elapsedMs < shopCheckIntervalMin * 60 * 1000) return;
+
+        lastInventoryCheckTime = Date.now();
+        console.log(`\n⏰ [정기 인벤토리 점검] ${shopCheckIntervalMin}분 경과! 가방 상태를 확인합니다.`);
+        await returnToDefaultHuntingGround();
+    }, 15000);
 
     // 💡 [보스 큐 및 실행 엔진]
     let isRunning = false;
@@ -1288,7 +1345,7 @@
         };
     }
 
-    // 💡 설정 UI (+1~+9 강화 목표 선택 드롭다운 포함)
+    // 💡 설정 UI (상점 판매 조건 + 정기 체크 주기 + 레어 파생 옵션 포함)
     function createSettingsUI() {
         if (document.getElementById('modak-bot-settings-ui')) return;
         const panel = document.createElement('div');
@@ -1308,7 +1365,7 @@
             z-index: 99999;
             background: rgba(20, 20, 20, 0.92);
             color: #fff;
-            width: 295px;
+            width: 300px;
             border-radius: 8px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.6);
             font-family: sans-serif;
@@ -1330,9 +1387,37 @@
             enhanceOptionsHTML += `<option value="${lv}" ${autoEnhanceTargetLevel === lv ? 'selected' : ''}>+${lv}</option>`;
         }
 
+        let slotOptionsHTML = '';
+        for (let s = 30; s <= 90; s += 10) {
+            slotOptionsHTML += `<option value="${s}" ${shopSellSlotThreshold === s ? 'selected' : ''}>${s}칸↑</option>`;
+        }
+
+        const intervalChoices = [
+            { val: 0, label: "사용안함" },
+            { val: 10, label: "10분" },
+            { val: 20, label: "20분" },
+            { val: 30, label: "30분" },
+            { val: 60, label: "60분" }
+        ];
+        const intervalOptionsHTML = intervalChoices.map(c =>
+            `<option value="${c.val}" ${shopCheckIntervalMin === c.val ? 'selected' : ''}>${c.label}</option>`
+        ).join('');
+
+        const gradeCheckboxesHTML = ALL_SELL_GRADES.map(g => {
+            const checked = shopSellGrades.includes(g) ? 'checked' : '';
+            return `
+                <label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;color:#ddd;cursor:pointer;">
+                    <input type="checkbox" class="sell-grade-chk" value="${g}" ${checked} style="margin:0;cursor:pointer;">
+                    <span>${g}</span>
+                </label>
+            `;
+        }).join('');
+
+        const isRareChecked = shopSellGrades.includes("레어");
+
         panel.innerHTML = `
             <div id="bot-header" style="background:rgba(40,40,40,0.95);padding:10px 12px;border-top-left-radius:7px;border-top-right-radius:7px;font-weight:bold;display:flex;justify-content:space-between;align-items:center;cursor:move;border-bottom:1px solid #444;">
-                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v3.97</span>
+                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v4.00</span>
                 <div>
                     <span id="bot-toggle" style="cursor:pointer;font-size:11px;color:#aaa;padding:2px 4px;">[접기]</span>
                 </div>
@@ -1350,11 +1435,37 @@
                         선택 ⚙️
                     </button>
                 </div>
-                <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-                    <span style="font-size:12px;font-weight:bold;">상점 자동 판매:</span>
-                    <button id="toggle-shop-btn" style="padding:3px 8px;font-size:11px;border-radius:4px;border:none;cursor:pointer;background:${isShopSellEnabled ? '#2e7d32' : '#c62828'};color:#fff;">
-                        ${isShopSellEnabled ? 'ON' : 'OFF'}
-                    </button>
+                <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:5px;padding:6px 8px;margin-bottom:8px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+                        <span style="font-size:12px;font-weight:bold;">상점 자동 판매:</span>
+                        <div style="display:flex;align-items:center;gap:4px;">
+                            <select id="shop-slot-select" title="가방 슬롯 판매 기준" style="padding:2px 4px;background:#333;color:#fff;border:1px solid #555;border-radius:4px;font-size:11px;cursor:pointer;">
+                                ${slotOptionsHTML}
+                            </select>
+                            <button id="toggle-shop-btn" style="padding:3px 8px;font-size:11px;border-radius:4px;border:none;cursor:pointer;background:${isShopSellEnabled ? '#2e7d32' : '#c62828'};color:#fff;">
+                                ${isShopSellEnabled ? 'ON' : 'OFF'}
+                            </button>
+                        </div>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+                        <span style="font-size:11px;color:#aaa;">정기 체크 주기:</span>
+                        <select id="shop-interval-select" title="일반 사냥 중 주기적 가방 확인 시간" style="padding:2px 6px;background:#333;color:#fff;border:1px solid #555;border-radius:4px;font-size:11px;cursor:pointer;">
+                            ${intervalOptionsHTML}
+                        </select>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                        <span style="font-size:11px;color:#aaa;">판매 등급:</span>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            ${gradeCheckboxesHTML}
+                        </div>
+                    </div>
+                    <div id="rare-sub-option-row" style="display:flex;justify-content:space-between;align-items:center;padding-top:4px;border-top:1px dashed rgba(255,255,255,0.08);opacity:${isRareChecked ? '1' : '0.45'};">
+                        <span style="font-size:11px;color:#90caf9;">↳ 레어 세부 옵션:</span>
+                        <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#e3f2fd;cursor:${isRareChecked ? 'pointer' : 'not-allowed'};">
+                            <input type="checkbox" id="exclude-gloves-boots-chk" ${isExcludeRareGlovesBoots ? 'checked' : ''} ${isRareChecked ? '' : 'disabled'} style="margin:0;cursor:inherit;">
+                            <span>장갑·장화 제외</span>
+                        </label>
+                    </div>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                     <span style="font-size:12px;font-weight:bold;">자동 강화 목표:</span>
@@ -1539,6 +1650,49 @@
             e.target.innerText = isBossHuntingEnabled ? 'ON' : 'OFF';
         };
         panel.querySelector('#open-filter-btn').onclick = openBossFilterModal;
+
+        const slotSelectEl = panel.querySelector('#shop-slot-select');
+        slotSelectEl.addEventListener('click', () => window.focus());
+        slotSelectEl.onchange = (e) => {
+            shopSellSlotThreshold = parseInt(e.target.value, 10);
+            localStorage.setItem('modak_shop_slot_threshold', shopSellSlotThreshold);
+            console.log(`[상점 설정] 판매 시작 슬롯 기준 '${shopSellSlotThreshold}칸 이상'으로 변경 완료`);
+            slotSelectEl.blur();
+        };
+
+        const intervalSelectEl = panel.querySelector('#shop-interval-select');
+        intervalSelectEl.addEventListener('click', () => window.focus());
+        intervalSelectEl.onchange = (e) => {
+            shopCheckIntervalMin = parseInt(e.target.value, 10);
+            localStorage.setItem('modak_shop_check_interval', shopCheckIntervalMin);
+            lastInventoryCheckTime = Date.now();
+            console.log(`[상점 설정] 정기 인벤토리 체크 주기 '${shopCheckIntervalMin > 0 ? shopCheckIntervalMin + '분' : '사용안함'}'(으)로 변경 완료`);
+            intervalSelectEl.blur();
+        };
+
+        const rareSubRowEl = panel.querySelector('#rare-sub-option-row');
+        const excludeChkEl = panel.querySelector('#exclude-gloves-boots-chk');
+
+        panel.querySelectorAll('.sell-grade-chk').forEach(chk => {
+            chk.onchange = () => {
+                shopSellGrades = Array.from(panel.querySelectorAll('.sell-grade-chk:checked')).map(el => el.value);
+                localStorage.setItem('modak_shop_sell_grades', JSON.stringify(shopSellGrades));
+
+                const rareActive = shopSellGrades.includes("레어");
+                rareSubRowEl.style.opacity = rareActive ? '1' : '0.45';
+                excludeChkEl.disabled = !rareActive;
+                excludeChkEl.parentElement.style.cursor = rareActive ? 'pointer' : 'not-allowed';
+
+                console.log(`[상점 설정] 판매 등급: [${shopSellGrades.join(', ') || '없음'}]`);
+            };
+        });
+
+        excludeChkEl.onchange = (e) => {
+            isExcludeRareGlovesBoots = e.target.checked;
+            localStorage.setItem('modak_shop_exclude_gloves_boots', isExcludeRareGlovesBoots);
+            console.log(`[상점 설정] 레어 장갑·장화 제외: ${isExcludeRareGlovesBoots ? 'ON' : 'OFF'}`);
+        };
+
         panel.querySelector('#toggle-shop-btn').onclick = (e) => {
             isShopSellEnabled = !isShopSellEnabled;
             localStorage.setItem('modak_shop_sell_enabled', isShopSellEnabled);
@@ -1647,5 +1801,5 @@
     window.testCheckBag = checkInventorySlotCount;
     window.testBlacksmith = visitBlacksmithAndEnhance;
 
-    console.log("모닥 온라인 스마트 라우팅 네비게이션 v3.97 로딩 완료!");
+    console.log("모닥 온라인 스마트 라우팅 네비게이션 v4.00 로딩 완료!");
 })();
