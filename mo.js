@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v4.01 (Blacksmith Retry & Storage Popup Guard)
+// @name         모닥 온라인 보스 오토봇 v4.02 (Full Bag Trigger + Auto Storage Deposit)
 // @namespace    http://tampermonkey.net/
-// @version      4.01
+// @version      4.02
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -22,6 +22,7 @@
 
     const TOWN_SHOP = { x: 32.53, y: 181.21 };
     const TOWN_BLACKSMITH = { x: 43.22, y: 204.41 };
+    const TOWN_STORAGE = { x: 62.98, y: 201.22 };
 
     // 💡 [실측 기반 보스 전투 위치]
     const BOSS_TARGETS = {
@@ -151,12 +152,15 @@
     let shopCheckIntervalMin = parseInt(localStorage.getItem('modak_shop_check_interval') ?? '30', 10);
     let shopSellGrades = loadSellGrades();
     let isExcludeRareGlovesBoots = localStorage.getItem('modak_shop_exclude_gloves_boots') !== 'false';
+    let isStorageDepositEnabled = localStorage.getItem('modak_storage_deposit_enabled') !== 'false';
     let isAutoEnhanceEnabled = localStorage.getItem('modak_auto_enhance_enabled') !== 'false';
     let autoEnhanceTargetLevel = parseInt(localStorage.getItem('modak_auto_enhance_level') ?? '8', 10);
     let bossHuntStartHour = parseInt(localStorage.getItem('modak_boss_start_hour') ?? '0', 10);
     let bossHuntEndHour = parseInt(localStorage.getItem('modak_boss_end_hour') ?? '24', 10);
 
     let lastInventoryCheckTime = Date.now();
+    let lastBagFullTriggerTime = 0;
+    let isBagFullPending = false;
 
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     const randomSleep = (minMs, maxMs) => new Promise(r => setTimeout(r, Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs));
@@ -450,7 +454,6 @@
                 console.log(`🎉 [모닥불 열림] ${curMap} 웨이포인트 메뉴 오픈 성공`);
                 return true;
             } else if (res === "wrong_npc") {
-                // 보관함/프리스트 등 인근 오브젝트가 열렸던 경우: 정밀 좌표로 재접근
                 console.log(`  -> [모닥불 재시도 ${attempt}/4] 정중앙 좌표로 미세 조정 후 재시도합니다.`);
                 await sleep(150);
             } else {
@@ -811,7 +814,7 @@
                 forceClickElement(selectSellBtn);
                 await randomSleep(700, 1000);
 
-                const confirmBtn = document.querySelector('button.is-danger') || 
+                const confirmBtn = document.querySelector('button.is-danger') ||
                                    Array.from(document.querySelectorAll('button')).find(b => b.innerText.trim() === "판매하기");
                 if (confirmBtn) {
                     forceClickElement(confirmBtn);
@@ -851,7 +854,6 @@
 
         let autoTabBtn = null;
 
-        // 💡 대장장이 접근 및 상호작용 최대 4회 재시도
         for (let attempt = 1; attempt <= 4; attempt++) {
             if (hasUrgentPriorityBossInQueue()) return;
 
@@ -867,7 +869,6 @@
 
             const tabWaitStart = Date.now();
             while (Date.now() - tabWaitStart < 2500) {
-                // 보관함 등 엉뚱한 창이 열렸는지 먼저 감시
                 if (document.querySelector('section.storage-panel')) {
                     console.log(`  -> [대장장이 오인식 ${attempt}/4] 보관함이 열려 닫고 위치를 미세 조정합니다.`);
                     await closeStorageAndWrongPanels();
@@ -992,6 +993,154 @@
         await closeReforgePanel();
     }
 
+    // 💡 [보관함 자동 예치 루틴] 가방 탭 -> 선택 이동 -> 아이템 전체 클릭 -> 보관 버튼 클릭
+    async function visitStorageAndDeposit() {
+        if (hasUrgentPriorityBossInQueue()) return;
+
+        console.log("\n📦 [보관함 방문] 가방에 남은 아이템을 보관하기 위해 모닥 마을 보관함으로 이동합니다.");
+        const inTown = await navigateToMap("모닥 마을");
+        if (!inTown) {
+            console.log("  -> [보관함 건너뜀] 모닥 마을 이동 실패");
+            return;
+        }
+        if (hasUrgentPriorityBossInQueue()) return;
+
+        const closeStoragePanel = async () => {
+            const closeBtn = document.querySelector('section.storage-panel button[aria-label="보관함 닫기"]') ||
+                             document.querySelector('button[aria-label="보관함 닫기"]');
+            if (closeBtn) forceClickElement(closeBtn);
+            else simulateKey('Escape');
+            await sleep(250);
+            await closeStorageAndWrongPanels();
+        };
+
+        await ensureMount();
+
+        let storagePanel = null;
+        for (let attempt = 1; attempt <= 4; attempt++) {
+            if (hasUrgentPriorityBossInQueue()) return;
+
+            const rx = attempt === 1 ? 1.8 : 1.2;
+            const ry = attempt === 1 ? 1.5 : 1.1;
+
+            await glideToTarget(TOWN_STORAGE.x, TOWN_STORAGE.y, rx, ry, 10.0);
+            await sleep(180);
+
+            if (hasUrgentPriorityBossInQueue()) return;
+
+            simulateKey('f');
+
+            const openStart = Date.now();
+            while (Date.now() - openStart < 2500) {
+                storagePanel = document.querySelector('section.storage-panel');
+                if (storagePanel) break;
+
+                if (document.querySelector('section.shop-panel, section.job-panel, .dialogue-box') ||
+                    document.getElementsByClassName("waypoint-destination").length > 0) {
+                    console.log(`  -> [보관함 오인식 ${attempt}/4] 다른 창이 열려 닫고 재시도합니다.`);
+                    await closeStorageAndWrongPanels();
+                    simulateKey('Escape');
+                    break;
+                }
+                await sleep(150);
+            }
+
+            if (storagePanel) {
+                console.log(`✅ [보관함 열림] (${attempt}차 시도 성공)`);
+                break;
+            }
+            console.log(`  -> [보관함 재시도 ${attempt}/4] 보관함 정중앙 좌표로 재접근합니다.`);
+        }
+
+        if (!storagePanel) {
+            console.log("  -> [보관함 실패] 보관함 창을 열지 못했습니다.");
+            await closeStoragePanel();
+            return;
+        }
+
+        // 1) '가방' 탭 클릭
+        const bagTabBtn = Array.from(storagePanel.querySelectorAll('button.storage-tab-button[role="tab"], button[role="tab"]')).find(
+            b => b.innerText.includes("가방")
+        );
+        if (bagTabBtn) {
+            if (bagTabBtn.getAttribute('aria-selected') !== 'true') {
+                forceClickElement(bagTabBtn);
+                await randomSleep(400, 650);
+            }
+        } else {
+            console.log("  -> [보관함 오류] 가방 탭을 찾지 못했습니다.");
+            await closeStoragePanel();
+            return;
+        }
+
+        if (hasUrgentPriorityBossInQueue()) {
+            await closeStoragePanel();
+            return;
+        }
+
+        // 2) '선택 이동' 버튼이 있으면 활성화 클릭
+        const selectMoveBtn = Array.from(storagePanel.querySelectorAll('button')).find(
+            b => b.innerText.replace(/\s+/g, '').includes("선택이동")
+        );
+        if (selectMoveBtn && selectMoveBtn.getAttribute('aria-pressed') !== 'true' && !selectMoveBtn.classList.contains('is-active')) {
+            forceClickElement(selectMoveBtn);
+            await randomSleep(350, 550);
+        }
+
+        // 3) 가방 그리드 내 보유 아이템 전체 체크
+        const itemSlots = Array.from(
+            storagePanel.querySelectorAll('.storage-inventory button.inventory-slot.has-item, button.inventory-slot.has-item[role="checkbox"]')
+        );
+
+        if (itemSlots.length === 0) {
+            console.log("  -> [보관함 건너뜀] 가방에 보관할 아이템이 없습니다.");
+            await closeStoragePanel();
+            return;
+        }
+
+        let checkedCount = 0;
+        for (const slot of itemSlots) {
+            if (hasUrgentPriorityBossInQueue()) {
+                await closeStoragePanel();
+                return;
+            }
+            if (slot.getAttribute('aria-checked') !== 'true') {
+                forceClickElement(slot);
+                checkedCount++;
+                await randomSleep(70, 140);
+            }
+        }
+        console.log(`  -> [아이템 선택] 가방 아이템 ${checkedCount}개 선택 완료`);
+        await randomSleep(350, 550);
+
+        // 4) 하단 'N개 보관' 버튼 클릭 (storagePanel 내부 및 document 전체에서 탐색)
+        let depositBtn = null;
+        const depositWaitStart = Date.now();
+        while (Date.now() - depositWaitStart < 2500) {
+            const candidates = Array.from(
+                document.querySelectorAll('.storage-transfer-footer button, section.storage-panel button[type="button"]')
+            );
+            depositBtn = candidates.find(
+                b => b.innerText.includes("보관") &&
+                     !b.innerText.includes("보관함") &&
+                     !b.disabled &&
+                     !b.hasAttribute('disabled')
+            );
+            if (depositBtn) break;
+            await sleep(150);
+        }
+
+        if (depositBtn) {
+            console.log(`📥 [보관 실행] '${depositBtn.innerText.trim()}' 버튼 클릭`);
+            forceClickElement(depositBtn);
+            await randomSleep(1000, 1400);
+        } else {
+            console.log("  -> [보관 실패] 활성화된 '보관' 버튼을 찾지 못했습니다.");
+        }
+
+        await closeStoragePanel();
+    }
+
     function getTownPortalButton() {
         return document.querySelector('.hud-movement-actions button.quick-action-slot[aria-label="마을 귀환"], .hud-movement-actions button.quick-action-slot[aria-label="귀환 취소"]');
     }
@@ -1038,7 +1187,7 @@
         return false;
     }
 
-    // 💡 [기본 사냥터 복귀 및 인벤토리 분기 실행]
+    // 💡 [기본 사냥터 복귀 및 인벤토리 정비(판매 -> 강화 -> 보관) 실행]
     async function moveToSelectedHuntingGround() {
         const allGrounds = getAllHuntingGrounds();
         const target = allGrounds.find(g => g.id === selectedHuntingGround) || allGrounds[0];
@@ -1047,16 +1196,28 @@
         await setAutoHunting(false);
         await closeStorageAndWrongPanels();
 
-        if (isShopSellEnabled) {
-            const slots = await checkInventorySlotCount();
-            console.log(`🎒 [인벤토리 검사] 현재 슬롯 사용량: ${slots}/100 (판매 기준: ${shopSellSlotThreshold}칸 이상)`);
+        const forceFullBagRun = isBagFullPending;
+        isBagFullPending = false;
 
-            if (slots >= shopSellSlotThreshold) {
-                console.log(`⚠️ [가방 포화] ${shopSellSlotThreshold}칸 이상! 모닥 마을 상점 판매 및 대장장이 정비를 시작합니다.`);
-                await visitShopAndSellItems();
+        if (isShopSellEnabled || forceFullBagRun) {
+            const slots = forceFullBagRun ? 100 : await checkInventorySlotCount();
+            if (!forceFullBagRun) {
+                console.log(`🎒 [인벤토리 검사] 현재 슬롯 사용량: ${slots}/100 (판매 기준: ${shopSellSlotThreshold}칸 이상)`);
+            }
+
+            if (forceFullBagRun || slots >= shopSellSlotThreshold) {
+                console.log(`⚠️ [마을 정비 시작] 상점 판매 ➔ 대장장이 강화 ➔ 보관함 예치 루틴을 진행합니다.`);
+
+                if (isShopSellEnabled) {
+                    await visitShopAndSellItems();
+                }
 
                 if (isAutoEnhanceEnabled && !hasUrgentPriorityBossInQueue()) {
                     await visitBlacksmithAndEnhance();
+                }
+
+                if (isStorageDepositEnabled && !hasUrgentPriorityBossInQueue()) {
+                    await visitStorageAndDeposit();
                 }
             } else {
                 console.log("✨ [가방 여유] 마을 방문 없이 최단 경로로 사냥터 직행");
@@ -1203,8 +1364,8 @@
         while (bossQueue.length > 0 || currentBossIndex !== -1) {
             if (isHandlingDeath) break;
 
-            let currentTarget = currentBossIndex !== -1 
-                ? { index: currentBossIndex, name: BOSS_TARGETS[currentBossIndex]?.name || "보스", retries: 0 } 
+            let currentTarget = currentBossIndex !== -1
+                ? { index: currentBossIndex, name: BOSS_TARGETS[currentBossIndex]?.name || "보스", retries: 0 }
                 : bossQueue.shift();
 
             const bossIndex = currentTarget.index;
@@ -1466,6 +1627,7 @@
 
         const intervalChoices = [
             { val: 0, label: "사용안함" },
+            { val: 5, label: "5분" },
             { val: 10, label: "10분" },
             { val: 20, label: "20분" },
             { val: 30, label: "30분" },
@@ -1489,7 +1651,7 @@
 
         panel.innerHTML = `
             <div id="bot-header" style="background:rgba(40,40,40,0.95);padding:10px 12px;border-top-left-radius:7px;border-top-right-radius:7px;font-weight:bold;display:flex;justify-content:space-between;align-items:center;cursor:move;border-bottom:1px solid #444;">
-                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v4.01</span>
+                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v4.02</span>
                 <div>
                     <span id="bot-toggle" style="cursor:pointer;font-size:11px;color:#aaa;padding:2px 4px;">[접기]</span>
                 </div>
@@ -1549,6 +1711,12 @@
                             ${isAutoEnhanceEnabled ? 'ON' : 'OFF'}
                         </button>
                     </div>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <span style="font-size:12px;font-weight:bold;">보관함 자동 보관:</span>
+                    <button id="toggle-storage-btn" style="padding:3px 8px;font-size:11px;border-radius:4px;border:none;cursor:pointer;background:${isStorageDepositEnabled ? '#2e7d32' : '#c62828'};color:#fff;">
+                        ${isStorageDepositEnabled ? 'ON' : 'OFF'}
+                    </button>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
                     <span style="font-size:12px;font-weight:bold;">사냥 시간대:</span>
@@ -1785,6 +1953,12 @@
             e.target.style.background = isAutoEnhanceEnabled ? '#2e7d32' : '#c62828';
             e.target.innerText = isAutoEnhanceEnabled ? 'ON' : 'OFF';
         };
+        panel.querySelector('#toggle-storage-btn').onclick = (e) => {
+            isStorageDepositEnabled = !isStorageDepositEnabled;
+            localStorage.setItem('modak_storage_deposit_enabled', isStorageDepositEnabled);
+            e.target.style.background = isStorageDepositEnabled ? '#2e7d32' : '#c62828';
+            e.target.innerText = isStorageDepositEnabled ? 'ON' : 'OFF';
+        };
         panel.querySelector('#start-h').onchange = (e) => {
             bossHuntStartHour = parseInt(e.target.value, 10);
             localStorage.setItem('modak_boss_start_hour', bossHuntStartHour);
@@ -1813,9 +1987,9 @@
         };
     }
 
-    // 💡 월드 이벤트 채팅 감시 (출발 지연 약 1초 적용)
+    // 💡 채팅 감시 (월드 이벤트 보스 출현/처치 + 가방 가득 참 시스템 메시지 감지)
     const processedMessages = new Set();
-    function handleWorldChat(node) {
+    function handleChatFeedItem(node) {
         const textEl = node.querySelector('.chat-msg-text');
         const timeEl = node.querySelector('.chat-msg-time');
         if (!textEl) return;
@@ -1824,6 +1998,23 @@
         const id = (timeEl ? timeEl.getAttribute('datetime') : '') + '_' + text;
         if (processedMessages.has(id)) return;
         processedMessages.add(id);
+
+        // 1) 시스템 메시지: 가방 가득 참 감지 ("보관 공간이 부족해 아이템을 획득하지 못했습니다.")
+        if (node.classList.contains('is-system') && text.includes("보관 공간이 부족해 아이템을 획득하지 못했습니다")) {
+            const now = Date.now();
+            if (now - lastBagFullTriggerTime > 60000) {
+                lastBagFullTriggerTime = now;
+                isBagFullPending = true;
+                console.log("🚨 [가방 포화 감지] 시스템 메시지 확인! 즉시 상점·강화·보관함 정비 루틴을 시작합니다.");
+                if (!isRunning && !isReturning && !isHandlingDeath && bossQueue.length === 0) {
+                    returnToDefaultHuntingGround();
+                }
+            }
+            return;
+        }
+
+        // 2) 월드 이벤트 메시지: 보스 출현 및 처치
+        if (!node.classList.contains('is-world_event')) return;
 
         const matchedEntry = Object.entries(BOSS_TARGETS).find(([_, b]) => text.includes(b.name));
         if (!matchedEntry) return;
@@ -1854,8 +2045,11 @@
         for (const m of mutations) {
             for (const n of m.addedNodes) {
                 if (n.nodeType === 1) {
-                    if (n.classList && n.classList.contains('is-world_event')) handleWorldChat(n);
-                    else n.querySelectorAll?.('.chat-feed-item.is-world_event')?.forEach(handleWorldChat);
+                    if (n.classList && (n.classList.contains('is-world_event') || n.classList.contains('is-system'))) {
+                        handleChatFeedItem(n);
+                    } else {
+                        n.querySelectorAll?.('.chat-feed-item.is-world_event, .chat-feed-item.is-system')?.forEach(handleChatFeedItem);
+                    }
                 }
             }
         }
@@ -1872,6 +2066,7 @@
     window.testMoveHuntingGround = returnToDefaultHuntingGround;
     window.testCheckBag = checkInventorySlotCount;
     window.testBlacksmith = visitBlacksmithAndEnhance;
+    window.testStorage = visitStorageAndDeposit;
 
-    console.log("모닥 온라인 스마트 라우팅 네비게이션 v4.01 로딩 완료!");
+    console.log("모닥 온라인 스마트 라우팅 네비게이션 v4.02 로딩 완료!");
 })();
