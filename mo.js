@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v4.00 (Periodic Inventory Check & Fixed Map Edges)
+// @name         모닥 온라인 보스 오토봇 v4.01 (Blacksmith Retry & Storage Popup Guard)
 // @namespace    http://tampermonkey.net/
-// @version      4.00
+// @version      4.01
 // @match        https://modakmmo.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
@@ -222,6 +222,28 @@
         }
     }
 
+    // 💡 보관함 및 잘못 열린 팝업 창 강제 닫기 헬퍼
+    async function closeStorageAndWrongPanels() {
+        const storagePanel = document.querySelector('section.storage-panel');
+        if (storagePanel) {
+            const closeBtn = storagePanel.querySelector('button[aria-label="보관함 닫기"]') ||
+                             document.querySelector('button[aria-label="보관함 닫기"]');
+            if (closeBtn) forceClickElement(closeBtn);
+            else simulateKey('Escape');
+            await sleep(200);
+            return true;
+        }
+        const wrong = document.querySelector('section.job-panel, [aria-labelledby="promotion-title"], section.shop-panel, .dialogue-box');
+        if (wrong) {
+            const closeBtn = wrong.querySelector('button[data-gamepad-close], button[aria-label*="닫기"]');
+            if (closeBtn) forceClickElement(closeBtn);
+            else simulateKey('Escape');
+            await sleep(200);
+            return true;
+        }
+        return false;
+    }
+
     // 💡 연속 글라이딩 + 관성 예측 조기 브레이크 엔진
     async function glideToTarget(targetX, targetY, radiusX = 3.5, radiusY = 2.8, maxTimeoutSec = 20) {
         console.log(`🧭 [글라이딩] (${targetX.toFixed(2)}, ${targetY.toFixed(2)}) 이동 시작`);
@@ -382,14 +404,21 @@
         return false;
     }
 
+    // 💡 캠프파이어 메뉴 오픈 확인 (보관함 등 오작동 창 감지 및 닫기 포함)
     async function checkWaypointMenu(timeoutMs = 2500) {
         const start = Date.now();
         while (Date.now() - start < timeoutMs) {
             if (document.getElementsByClassName("waypoint-destination").length > 0) return "campfire";
+
+            if (document.querySelector('section.storage-panel')) {
+                console.log("  -> [오작동 감지] 캠프파이어 대신 보관함이 열려 닫습니다.");
+                await closeStorageAndWrongPanels();
+                return "wrong_npc";
+            }
+
             const wrong = document.querySelector('section.job-panel, [aria-labelledby="promotion-title"], section.shop-panel, .dialogue-box');
             if (wrong) {
-                simulateKey('Escape');
-                await sleep(200);
+                await closeStorageAndWrongPanels();
                 return "wrong_npc";
             }
             await sleep(100);
@@ -404,10 +433,14 @@
 
         console.log(`🔥 [캠프파이어 접근] ${curMap} 모닥불로 글라이딩...`);
         await setAutoHunting(false);
+        await closeStorageAndWrongPanels();
         await ensureMount();
 
-        for (let attempt = 1; attempt <= 3; attempt++) {
-            await glideToTarget(camp.x, camp.y, 2.5, 2.0, 12);
+        for (let attempt = 1; attempt <= 4; attempt++) {
+            const rx = attempt === 1 ? 2.2 : 1.4;
+            const ry = attempt === 1 ? 1.8 : 1.2;
+
+            await glideToTarget(camp.x, camp.y, rx, ry, 12);
             await sleep(120);
 
             simulateKey('f');
@@ -417,11 +450,11 @@
                 console.log(`🎉 [모닥불 열림] ${curMap} 웨이포인트 메뉴 오픈 성공`);
                 return true;
             } else if (res === "wrong_npc") {
-                fireKey('keydown', 's');
-                await sleep(300);
-                fireKey('keyup', 's');
+                // 보관함/프리스트 등 인근 오브젝트가 열렸던 경우: 정밀 좌표로 재접근
+                console.log(`  -> [모닥불 재시도 ${attempt}/4] 정중앙 좌표로 미세 조정 후 재시도합니다.`);
                 await sleep(150);
             } else {
+                await closeStorageAndWrongPanels();
                 simulateKey('Escape');
                 await sleep(250);
             }
@@ -495,6 +528,7 @@
     // 💡 [스마트 라우팅 엔진 - 포탈 직행(2회 이하) vs 캠프파이어 워프 비용 비교]
     async function navigateToMap(targetMap) {
         await setAutoHunting(false);
+        await closeStorageAndWrongPanels();
 
         let curMap = getCurrentMapName();
         if (curMap === targetMap) return true;
@@ -609,6 +643,7 @@
 
     async function checkInventorySlotCount() {
         await ensureLootPanelClosed(1500);
+        await closeStorageAndWrongPanels();
 
         const isInventoryOpen = () => {
             return !!document.querySelector('.equipment-inventory[aria-label*="가방"], .inventory-heading-count');
@@ -776,7 +811,7 @@
                 forceClickElement(selectSellBtn);
                 await randomSleep(700, 1000);
 
-                const confirmBtn = document.querySelector('button.is-danger') ||
+                const confirmBtn = document.querySelector('button.is-danger') || 
                                    Array.from(document.querySelectorAll('button')).find(b => b.innerText.trim() === "판매하기");
                 if (confirmBtn) {
                     forceClickElement(confirmBtn);
@@ -791,7 +826,7 @@
         await sleep(300);
     }
 
-    // 💡 모닥 마을 대장장이 +1~+9 선택형 자동 강화 루틴
+    // 💡 모닥 마을 대장장이 +1~+9 선택형 자동 강화 루틴 (실패/보관함 오인식 시 최대 4회 재시도 포함)
     async function visitBlacksmithAndEnhance() {
         if (hasUrgentPriorityBossInQueue()) return;
 
@@ -804,36 +839,69 @@
         }
         if (hasUrgentPriorityBossInQueue()) return;
 
-        await ensureMount();
-        await glideToTarget(TOWN_BLACKSMITH.x, TOWN_BLACKSMITH.y, 2.3, 1.8, 10.0);
-        await sleep(200);
-
-        if (hasUrgentPriorityBossInQueue()) return;
-
         const closeReforgePanel = async () => {
             const closeBtn = document.querySelector('button[aria-label="강화소 닫기"]');
             if (closeBtn) forceClickElement(closeBtn);
             else simulateKey('Escape');
-            await sleep(300);
+            await sleep(250);
+            await closeStorageAndWrongPanels();
         };
 
-        simulateKey('f');
+        await ensureMount();
+
         let autoTabBtn = null;
-        const tabWaitStart = Date.now();
-        while (Date.now() - tabWaitStart < 3000) {
-            const tabs = document.querySelectorAll('button[role="tab"]');
-            for (const t of tabs) {
-                if (t.innerText.includes("자동 강화")) {
-                    autoTabBtn = t;
+
+        // 💡 대장장이 접근 및 상호작용 최대 4회 재시도
+        for (let attempt = 1; attempt <= 4; attempt++) {
+            if (hasUrgentPriorityBossInQueue()) return;
+
+            const rx = attempt === 1 ? 1.8 : 1.2;
+            const ry = attempt === 1 ? 1.5 : 1.1;
+
+            await glideToTarget(TOWN_BLACKSMITH.x, TOWN_BLACKSMITH.y, rx, ry, 10.0);
+            await sleep(180);
+
+            if (hasUrgentPriorityBossInQueue()) return;
+
+            simulateKey('f');
+
+            const tabWaitStart = Date.now();
+            while (Date.now() - tabWaitStart < 2500) {
+                // 보관함 등 엉뚱한 창이 열렸는지 먼저 감시
+                if (document.querySelector('section.storage-panel')) {
+                    console.log(`  -> [대장장이 오인식 ${attempt}/4] 보관함이 열려 닫고 위치를 미세 조정합니다.`);
+                    await closeStorageAndWrongPanels();
                     break;
                 }
+                if (document.querySelector('section.shop-panel, section.job-panel, .dialogue-box')) {
+                    console.log(`  -> [대장장이 오인식 ${attempt}/4] 다른 NPC 창이 열려 닫고 재시도합니다.`);
+                    await closeStorageAndWrongPanels();
+                    break;
+                }
+
+                const tabs = document.querySelectorAll('button[role="tab"]');
+                for (const t of tabs) {
+                    if (t.innerText.includes("자동 강화")) {
+                        autoTabBtn = t;
+                        break;
+                    }
+                }
+                if (autoTabBtn) break;
+                await sleep(150);
             }
-            if (autoTabBtn) break;
-            await sleep(150);
+
+            if (autoTabBtn) {
+                console.log(`✅ [대장장이 열림] (${attempt}차 시도 성공)`);
+                break;
+            }
+
+            console.log(`  -> [대장장이 재시도 ${attempt}/4] 대장장이 정중앙 좌표로 재접근합니다.`);
+            await closeReforgePanel();
+            await sleep(200);
         }
 
         if (!autoTabBtn) {
-            console.log("  -> [대장장이 실패] 자동 강화 탭을 찾지 못했습니다.");
+            console.log("  -> [대장장이 최종 실패] 4회 시도 후에도 자동 강화 탭을 찾지 못했습니다.");
             await closeReforgePanel();
             return;
         }
@@ -935,6 +1003,7 @@
     async function smartReturnTown() {
         if (getCurrentMapName() === "모닥 마을") return true;
         await ensureLootPanelClosed(2000);
+        await closeStorageAndWrongPanels();
         simulateKey('Escape');
         await sleep(200);
         await setAutoHunting(false);
@@ -976,6 +1045,7 @@
         console.log(`\n🎯 [복귀 및 정비 체크] 기본 사냥터 대상: '${target.name}' (${target.map})`);
 
         await setAutoHunting(false);
+        await closeStorageAndWrongPanels();
 
         if (isShopSellEnabled) {
             const slots = await checkInventorySlotCount();
@@ -1128,12 +1198,13 @@
         isRunning = true;
 
         await setAutoHunting(false);
+        await closeStorageAndWrongPanels();
 
         while (bossQueue.length > 0 || currentBossIndex !== -1) {
             if (isHandlingDeath) break;
 
-            let currentTarget = currentBossIndex !== -1
-                ? { index: currentBossIndex, name: BOSS_TARGETS[currentBossIndex]?.name || "보스", retries: 0 }
+            let currentTarget = currentBossIndex !== -1 
+                ? { index: currentBossIndex, name: BOSS_TARGETS[currentBossIndex]?.name || "보스", retries: 0 } 
                 : bossQueue.shift();
 
             const bossIndex = currentTarget.index;
@@ -1277,6 +1348,7 @@
         await waitForMap("모닥 마을", 15);
         await sleep(800);
         await ensureLootPanelClosed(3000);
+        await closeStorageAndWrongPanels();
         simulateKey('Escape');
 
         isHandlingDeath = false;
@@ -1345,7 +1417,7 @@
         };
     }
 
-    // 💡 설정 UI (상점 판매 조건 + 정기 체크 주기 + 레어 파생 옵션 포함)
+    // 💡 설정 UI
     function createSettingsUI() {
         if (document.getElementById('modak-bot-settings-ui')) return;
         const panel = document.createElement('div');
@@ -1417,7 +1489,7 @@
 
         panel.innerHTML = `
             <div id="bot-header" style="background:rgba(40,40,40,0.95);padding:10px 12px;border-top-left-radius:7px;border-top-right-radius:7px;font-weight:bold;display:flex;justify-content:space-between;align-items:center;cursor:move;border-bottom:1px solid #444;">
-                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v4.00</span>
+                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v4.01</span>
                 <div>
                     <span id="bot-toggle" style="cursor:pointer;font-size:11px;color:#aaa;padding:2px 4px;">[접기]</span>
                 </div>
@@ -1801,5 +1873,5 @@
     window.testCheckBag = checkInventorySlotCount;
     window.testBlacksmith = visitBlacksmithAndEnhance;
 
-    console.log("모닥 온라인 스마트 라우팅 네비게이션 v4.00 로딩 완료!");
+    console.log("모닥 온라인 스마트 라우팅 네비게이션 v4.01 로딩 완료!");
 })();
