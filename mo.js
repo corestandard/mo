@@ -1,11 +1,9 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v4.02 (Full Bag Trigger + Auto Storage Deposit)
+// @name         모닥 온라인 보스 오토봇 v4.04 (Separated Maintenance UI)
 // @namespace    http://tampermonkey.net/
-// @version      4.02
+// @version      4.04
 // @match        https://modakmmo.com/*
 // @grant        none
-// @downloadURL  https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
-// @updateURL    https://raw.githubusercontent.com/corestandard/mo/refs/heads/main/mo.js
 // ==/UserScript==
 
 (function() {
@@ -58,7 +56,6 @@
         { id: "shade_forest_3", name: "그늘숲 3시 (오크의 전투나팔)", map: "그늘숲", x: 124.13, y: 331.56 }
     ];
 
-    // 💡 사용자 커스텀 사냥터 로드/저장 및 통합 목록 반환
     function loadCustomHuntingGrounds() {
         try {
             const raw = localStorage.getItem('modak_custom_grounds');
@@ -132,7 +129,6 @@
         ]
     };
 
-    // 💡 상점 판매 등급 설정 로드/저장
     const ALL_SELL_GRADES = ["노멀", "매직", "레어"];
     function loadSellGrades() {
         try {
@@ -161,14 +157,30 @@
     let lastInventoryCheckTime = Date.now();
     let lastBagFullTriggerTime = 0;
     let isBagFullPending = false;
+    let maintenancePauseUntil = 0;
+
+    // 💡 비동기 작업 취소 토큰 (사망/긴급 전환 시 증가시켜 이전 루프 즉시 중단)
+    let runToken = 0;
 
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     const randomSleep = (minMs, maxMs) => new Promise(r => setTimeout(r, Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs));
 
+    // 💡 [표준 키보드 이벤트 발생기] Escape(27) 및 대문자 keyCode 표준화
     function fireKey(type, keyChar) {
-        const char = keyChar.toLowerCase();
-        const code = char.charCodeAt(0);
-        document.dispatchEvent(new KeyboardEvent(type, { key: char, code: 'Key' + char.toUpperCase(), keyCode: code, which: code, bubbles: true }));
+        let init;
+        if (keyChar.toLowerCase() === 'escape') {
+            init = { key: 'Escape', code: 'Escape', keyCode: 27, which: 27 };
+        } else {
+            const k = keyChar.toLowerCase();
+            const up = k.toUpperCase();
+            init = {
+                key: k,
+                code: 'Key' + up,
+                keyCode: up.charCodeAt(0),
+                which: up.charCodeAt(0)
+            };
+        }
+        document.dispatchEvent(new KeyboardEvent(type, { ...init, bubbles: true }));
     }
 
     function simulateKey(keyChar, duration = 100) {
@@ -189,17 +201,17 @@
         return { x: calibratedX, y: calibratedY };
     }
 
-    // 💡 시즌 괄호 표기 제거 (예: '모닥 마을(겨울)' -> '모닥 마을')
     function getCurrentMapName() {
         const mapNameEl = document.getElementsByClassName("panel-list-name")[0];
         if (!mapNameEl) return "";
         return mapNameEl.innerText.replace(/\(.*?\)/g, '').trim();
     }
 
-    async function waitForMap(expectedName, timeoutSec = 15) {
+    async function waitForMap(expectedName, timeoutSec = 15, token = runToken) {
         console.log(`  -> [맵 전환 대기] '${expectedName}' 확인 중 (최대 ${timeoutSec}초)`);
         const startTime = Date.now();
         while (Date.now() - startTime < timeoutSec * 1000) {
+            if (token !== runToken || isHandlingDeath) return false;
             const cur = getCurrentMapName();
             if (cur.includes(expectedName)) {
                 await randomSleep(250, 400);
@@ -226,7 +238,6 @@
         }
     }
 
-    // 💡 보관함 및 잘못 열린 팝업 창 강제 닫기 헬퍼
     async function closeStorageAndWrongPanels() {
         const storagePanel = document.querySelector('section.storage-panel');
         if (storagePanel) {
@@ -248,8 +259,8 @@
         return false;
     }
 
-    // 💡 연속 글라이딩 + 관성 예측 조기 브레이크 엔진
-    async function glideToTarget(targetX, targetY, radiusX = 3.5, radiusY = 2.8, maxTimeoutSec = 20) {
+    // 💡 연속 글라이딩 + 관성 예측 조기 브레이크 엔진 (runToken 및 보스 조기 처치 감지 포함)
+    async function glideToTarget(targetX, targetY, radiusX = 3.5, radiusY = 2.8, maxTimeoutSec = 20, token = runToken, watchBossIdx = -1) {
         console.log(`🧭 [글라이딩] (${targetX.toFixed(2)}, ${targetY.toFixed(2)}) 이동 시작`);
         const startTime = Date.now();
         let activeKeys = new Set();
@@ -275,6 +286,12 @@
 
         try {
             while (Date.now() - startTime < maxTimeoutSec * 1000) {
+                if (token !== runToken || isHandlingDeath) return false;
+                if (watchBossIdx !== -1 && defeatedBosses.has(watchBossIdx)) {
+                    console.log(`  -> [이동 중단] 목표 보스([${watchBossIdx}])가 이미 처치되어 이동을 멈춥니다.`);
+                    return false;
+                }
+
                 const cur = getCoords();
                 if (!cur) { await sleep(45); continue; }
 
@@ -367,10 +384,11 @@
                btn.getAttribute('aria-label') === '내리기';
     }
 
-    async function ensureMount(maxRetries = 3) {
+    async function ensureMount(maxRetries = 3, token = runToken) {
         if (isCurrentlyMounted()) return true;
 
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            if (token !== runToken || isHandlingDeath) return false;
             if (document.querySelector('section.loot-panel')) {
                 await ensureLootPanelClosed(600);
             }
@@ -408,7 +426,6 @@
         return false;
     }
 
-    // 💡 캠프파이어 메뉴 오픈 확인 (보관함 등 오작동 창 감지 및 닫기 포함)
     async function checkWaypointMenu(timeoutMs = 2500) {
         const start = Date.now();
         while (Date.now() - start < timeoutMs) {
@@ -430,7 +447,7 @@
         return "none";
     }
 
-    async function interactWithLocalCampfire() {
+    async function interactWithLocalCampfire(token = runToken) {
         const curMap = getCurrentMapName();
         const camp = CAMPFIRES[curMap];
         if (!camp) return false;
@@ -438,13 +455,16 @@
         console.log(`🔥 [캠프파이어 접근] ${curMap} 모닥불로 글라이딩...`);
         await setAutoHunting(false);
         await closeStorageAndWrongPanels();
-        await ensureMount();
+        await ensureMount(3, token);
 
         for (let attempt = 1; attempt <= 4; attempt++) {
+            if (token !== runToken || isHandlingDeath) return false;
+
             const rx = attempt === 1 ? 2.2 : 1.4;
             const ry = attempt === 1 ? 1.8 : 1.2;
 
-            await glideToTarget(camp.x, camp.y, rx, ry, 12);
+            await glideToTarget(camp.x, camp.y, rx, ry, 12, token);
+            if (token !== runToken || isHandlingDeath) return false;
             await sleep(120);
 
             simulateKey('f');
@@ -488,23 +508,30 @@
         return null;
     }
 
-    async function traversePortalStep(step) {
-        await ensureMount();
+    async function traversePortalStep(step, token = runToken, watchBossIdx = -1) {
+        if (token !== runToken || isHandlingDeath) return false;
+        if (watchBossIdx !== -1 && defeatedBosses.has(watchBossIdx)) return false;
+
+        await ensureMount(3, token);
 
         if (step.waypoints) {
             for (const wp of step.waypoints) {
-                await glideToTarget(wp.x, wp.y, 2.5, 2.0, 15);
+                const wpOk = await glideToTarget(wp.x, wp.y, 2.5, 2.0, 15, token, watchBossIdx);
+                if (!wpOk) return false;
             }
         }
 
         for (let attempt = 1; attempt <= 8; attempt++) {
+            if (token !== runToken || isHandlingDeath) return false;
+            if (watchBossIdx !== -1 && defeatedBosses.has(watchBossIdx)) return false;
             if (getCurrentMapName().includes(step.to)) return true;
 
             const rx = attempt === 1 ? 1.8 : 1.2;
             const ry = attempt === 1 ? 1.6 : 1.2;
 
-            await ensureMount();
-            await glideToTarget(step.portal.x, step.portal.y, rx, ry, 10);
+            await ensureMount(3, token);
+            const arrived = await glideToTarget(step.portal.x, step.portal.y, rx, ry, 10, token, watchBossIdx);
+            if (!arrived) return false;
             await sleep(60);
 
             if (document.querySelector('section.loot-panel')) {
@@ -515,6 +542,7 @@
 
             const waitStart = Date.now();
             while (Date.now() - waitStart < 1500) {
+                if (token !== runToken || isHandlingDeath) return false;
                 if (getCurrentMapName().includes(step.to)) {
                     await sleep(250);
                     return true;
@@ -529,9 +557,12 @@
     }
 
     // 💡 [스마트 라우팅 엔진 - 포탈 직행(2회 이하) vs 캠프파이어 워프 비용 비교]
-    async function navigateToMap(targetMap) {
+    async function navigateToMap(targetMap, token = runToken, watchBossIdx = -1) {
         await setAutoHunting(false);
         await closeStorageAndWrongPanels();
+
+        if (token !== runToken || isHandlingDeath) return false;
+        if (watchBossIdx !== -1 && defeatedBosses.has(watchBossIdx)) return false;
 
         let curMap = getCurrentMapName();
         if (curMap === targetMap) return true;
@@ -578,7 +609,7 @@
         if (walkPath && (walkPath.length <= 2 || walkCost <= warpCost)) {
             console.log(`  -> [포탈 직행] 캠프파이어 없이 포탈 ${walkPath.length}회 경유로 최단 이동합니다.`);
             for (const step of walkPath) {
-                const ok = await traversePortalStep(step);
+                const ok = await traversePortalStep(step, token, watchBossIdx);
                 if (!ok) return false;
             }
             return true;
@@ -587,26 +618,31 @@
         console.log(`  -> [캠프파이어 워프] 원거리 이동 (도보 ${walkCost}회 vs 워프 경로)`);
         if (pathToStartCamp) {
             for (const step of pathToStartCamp) {
-                const ok = await traversePortalStep(step);
+                const ok = await traversePortalStep(step, token, watchBossIdx);
                 if (!ok) return false;
             }
             curMap = getCurrentMapName();
         } else {
             console.log("  -> 캠프파이어 보유 맵 연결 실패. 비상 마을 귀환(B) 실행");
-            await smartReturnTown();
+            await smartReturnTown(token);
             curMap = getCurrentMapName();
         }
 
+        if (token !== runToken || isHandlingDeath) return false;
+        if (watchBossIdx !== -1 && defeatedBosses.has(watchBossIdx)) return false;
+
         if (bestTargetCamp) {
             if (curMap !== bestTargetCamp) {
-                const ok = await interactWithLocalCampfire();
+                const ok = await interactWithLocalCampfire(token);
                 if (!ok) return false;
 
-                const dests = document.getElementsByClassName("waypoint-destination");
+                const dests = Array.from(document.getElementsByClassName("waypoint-destination"));
                 const wpIdx = CAMPFIRES[bestTargetCamp].wpIndex;
-                if (dests && dests[wpIdx]) {
-                    dests[wpIdx].click();
-                    const transOk = await waitForMap(bestTargetCamp, 15);
+                const matchedDest = dests.find(d => d.innerText.includes(bestTargetCamp)) || dests[wpIdx];
+
+                if (matchedDest) {
+                    forceClickElement(matchedDest);
+                    const transOk = await waitForMap(bestTargetCamp, 15, token);
                     if (!transOk) return false;
                 } else {
                     return false;
@@ -614,7 +650,7 @@
             }
 
             for (const step of pathFromTargetCamp) {
-                const ok = await traversePortalStep(step);
+                const ok = await traversePortalStep(step, token, watchBossIdx);
                 if (!ok) return false;
             }
             return true;
@@ -677,7 +713,7 @@
 
         if (!isInventoryOpen()) {
             console.log("❌ [인벤토리 오픈 실패] 슬롯 확인 건너뜀");
-            return 0;
+            return null;
         }
 
         await sleep(250);
@@ -721,8 +757,8 @@
         return bossQueue.some(b => PRIORITY_BOSSES.has(b.index) && !defeatedBosses.has(b.index));
     }
 
-    // 💡 모닥 마을 상점 판매 루틴 (UI 선택 등급 + 레어 장갑·장화 제외 파생 옵션 반영)
-    async function visitShopAndSellItems() {
+    // 💡 모닥 마을 상점 판매 루틴
+    async function visitShopAndSellItems(token = runToken) {
         if (shopSellGrades.length === 0) {
             console.log("\n🏪 [상점 건너뜀] 선택된 판매 등급이 없습니다.");
             return;
@@ -734,48 +770,90 @@
         const displayGrades = shopSellGrades.map(g => g === "레어" ? rareDesc : g).join(', ');
 
         console.log(`\n🏪 [상점 방문] 선택 등급(${displayGrades}) 판매를 위해 모닥 마을 상점으로 이동합니다.`);
-        const inTown = await navigateToMap("모닥 마을");
+        const inTown = await navigateToMap("모닥 마을", token);
         if (!inTown) {
             console.log("  -> [상점 건너뜀] 모닥 마을 이동 실패");
             return;
         }
-        if (hasUrgentPriorityBossInQueue()) return;
+        if (token !== runToken || hasUrgentPriorityBossInQueue()) return;
 
-        await ensureMount();
-        await glideToTarget(TOWN_SHOP.x, TOWN_SHOP.y, 2.5, 2.0, 8.0);
-        await sleep(200);
+        const closeShopPanel = async () => {
+            const closeBtn = document.querySelector('section.shop-panel button[aria-label="상점 닫기"]') ||
+                             document.querySelector('button[aria-label="상점 닫기"]');
+            if (closeBtn) forceClickElement(closeBtn);
+            else simulateKey('Escape');
+            await sleep(250);
+            await closeStorageAndWrongPanels();
+        };
 
-        if (hasUrgentPriorityBossInQueue()) return;
+        await ensureMount(3, token);
 
-        simulateKey('f');
-        await randomSleep(900, 1300);
+        let shopPanel = null;
+        for (let attempt = 1; attempt <= 4; attempt++) {
+            if (token !== runToken || hasUrgentPriorityBossInQueue()) return;
 
-        let sellTabBtn = null;
-        const tabStart = Date.now();
-        while (Date.now() - tabStart < 3000) {
-            const tabs = document.querySelectorAll('button[role="tab"]');
-            for (const t of tabs) {
-                if (t.innerText.includes("판매")) { sellTabBtn = t; break; }
+            const rx = attempt === 1 ? 2.2 : 1.3;
+            const ry = attempt === 1 ? 1.8 : 1.1;
+
+            await glideToTarget(TOWN_SHOP.x, TOWN_SHOP.y, rx, ry, 8.0, token);
+            if (token !== runToken || hasUrgentPriorityBossInQueue()) return;
+            await sleep(180);
+
+            simulateKey('f');
+
+            const openStart = Date.now();
+            while (Date.now() - openStart < 2500) {
+                shopPanel = document.querySelector('section.shop-panel');
+                if (shopPanel) break;
+
+                if (document.querySelector('section.storage-panel, section.job-panel, .dialogue-box')) {
+                    console.log(`  -> [상점 오인식 ${attempt}/4] 다른 창이 열려 닫고 재시도합니다.`);
+                    await closeStorageAndWrongPanels();
+                    break;
+                }
+                await sleep(150);
             }
-            if (sellTabBtn) break;
-            await sleep(200);
+
+            if (shopPanel) {
+                console.log(`✅ [상점 열림] (${attempt}차 시도 성공)`);
+                break;
+            }
+            console.log(`  -> [상점 재시도 ${attempt}/4] 상점 정중앙 좌표로 재접근합니다.`);
+            await closeShopPanel();
         }
 
-        if (sellTabBtn) {
+        if (!shopPanel) {
+            console.log("  -> [상점 실패] 상점 창을 열지 못했습니다.");
+            await closeShopPanel();
+            return;
+        }
+
+        const sellTabBtn = Array.from(shopPanel.querySelectorAll('button[role="tab"]')).find(
+            t => t.innerText.includes("판매")
+        );
+        if (sellTabBtn && sellTabBtn.getAttribute('aria-selected') !== 'true') {
             forceClickElement(sellTabBtn);
             await randomSleep(500, 800);
         }
 
         let clickedCount = 0;
-        const shopButtons = Array.from(document.querySelectorAll('button[type="button"]'));
 
         for (const name of shopSellGrades) {
+            if (token !== runToken || hasUrgentPriorityBossInQueue()) {
+                await closeShopPanel();
+                return;
+            }
+
             if (name === "레어" && isExcludeRareGlovesBoots) {
                 const rareSlots = Array.from(
                     document.querySelectorAll('.shop-item-grid button.inventory-slot.has-item.rarity-rare')
                 );
                 let excludedCount = 0;
                 for (const slot of rareSlots) {
+                    if (token !== runToken || hasUrgentPriorityBossInQueue()) {
+                        await closeShopPanel();
+                        return;
+                    }
                     const itemName = slot.getAttribute('aria-label') || '';
                     if (itemName.includes("장갑") || itemName.includes("장화")) {
                         excludedCount++;
@@ -789,7 +867,8 @@
                 }
                 console.log(`  -> [레어 필터링] 일반 레어 선택 완료 (장갑·장화 ${excludedCount}개 제외)`);
             } else {
-                const btn = shopButtons.find(b => b.innerText.trim() === name);
+                const currentShopButtons = Array.from(document.querySelectorAll('section.shop-panel button[type="button"]'));
+                const btn = currentShopButtons.find(b => b.innerText.trim() === name);
                 if (btn && !btn.disabled && !btn.hasAttribute('disabled')) {
                     forceClickElement(btn);
                     clickedCount++;
@@ -802,7 +881,9 @@
             let selectSellBtn = null;
             const selectStart = Date.now();
             while (Date.now() - selectStart < 3500) {
-                const found = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes("선택 판매"));
+                const found = Array.from(document.querySelectorAll('section.shop-panel button')).find(
+                    b => b.innerText.includes("선택 판매")
+                );
                 if (found && !found.disabled && !found.hasAttribute('disabled')) {
                     selectSellBtn = found;
                     break;
@@ -814,7 +895,7 @@
                 forceClickElement(selectSellBtn);
                 await randomSleep(700, 1000);
 
-                const confirmBtn = document.querySelector('button.is-danger') ||
+                const confirmBtn = document.querySelector('section.shop-panel button.is-danger, [role="dialog"] button.is-danger') ||
                                    Array.from(document.querySelectorAll('button')).find(b => b.innerText.trim() === "판매하기");
                 if (confirmBtn) {
                     forceClickElement(confirmBtn);
@@ -823,24 +904,21 @@
             }
         }
 
-        const closeBtn = document.querySelector('button[aria-label="상점 닫기"]');
-        if (closeBtn) forceClickElement(closeBtn);
-        else simulateKey('Escape');
-        await sleep(300);
+        await closeShopPanel();
     }
 
-    // 💡 모닥 마을 대장장이 +1~+9 선택형 자동 강화 루틴 (실패/보관함 오인식 시 최대 4회 재시도 포함)
-    async function visitBlacksmithAndEnhance() {
-        if (hasUrgentPriorityBossInQueue()) return;
+    // 💡 모닥 마을 대장장이 +1~+9 선택형 자동 강화 루틴
+    async function visitBlacksmithAndEnhance(token = runToken) {
+        if (token !== runToken || hasUrgentPriorityBossInQueue()) return;
 
         const targetLabel = `+${autoEnhanceTargetLevel}`;
         console.log(`\n🔨 [대장장이 방문] ${targetLabel} 자동 강화를 위해 대장장이로 이동합니다.`);
-        const inTown = await navigateToMap("모닥 마을");
+        const inTown = await navigateToMap("모닥 마을", token);
         if (!inTown) {
             console.log("  -> [대장장이 건너뜀] 모닥 마을 이동 실패");
             return;
         }
-        if (hasUrgentPriorityBossInQueue()) return;
+        if (token !== runToken || hasUrgentPriorityBossInQueue()) return;
 
         const closeReforgePanel = async () => {
             const closeBtn = document.querySelector('button[aria-label="강화소 닫기"]');
@@ -850,20 +928,19 @@
             await closeStorageAndWrongPanels();
         };
 
-        await ensureMount();
+        await ensureMount(3, token);
 
         let autoTabBtn = null;
 
         for (let attempt = 1; attempt <= 4; attempt++) {
-            if (hasUrgentPriorityBossInQueue()) return;
+            if (token !== runToken || hasUrgentPriorityBossInQueue()) return;
 
             const rx = attempt === 1 ? 1.8 : 1.2;
             const ry = attempt === 1 ? 1.5 : 1.1;
 
-            await glideToTarget(TOWN_BLACKSMITH.x, TOWN_BLACKSMITH.y, rx, ry, 10.0);
+            await glideToTarget(TOWN_BLACKSMITH.x, TOWN_BLACKSMITH.y, rx, ry, 10.0, token);
+            if (token !== runToken || hasUrgentPriorityBossInQueue()) return;
             await sleep(180);
-
-            if (hasUrgentPriorityBossInQueue()) return;
 
             simulateKey('f');
 
@@ -912,7 +989,7 @@
             await randomSleep(400, 600);
         }
 
-        if (hasUrgentPriorityBossInQueue()) {
+        if (token !== runToken || hasUrgentPriorityBossInQueue()) {
             await closeReforgePanel();
             return;
         }
@@ -938,7 +1015,7 @@
         forceClickElement(selectAllBtn);
         await randomSleep(400, 600);
 
-        if (hasUrgentPriorityBossInQueue()) {
+        if (token !== runToken || hasUrgentPriorityBossInQueue()) {
             await closeReforgePanel();
             return;
         }
@@ -971,8 +1048,8 @@
                 sawRunningState = true;
             }
 
-            if (hasUrgentPriorityBossInQueue()) {
-                console.log("🚨 [긴급 탈출] 최우선 보스 출현 감지! 자동 강화를 즉시 중지하고 출동합니다.");
+            if (token !== runToken || hasUrgentPriorityBossInQueue()) {
+                console.log("🚨 [긴급 탈출] 우선 작업 발생! 자동 강화를 즉시 중지하고 출동합니다.");
                 if (isEnhancing) {
                     forceClickElement(actionBtn);
                     await sleep(300);
@@ -989,21 +1066,27 @@
             }
         }
 
+        const finalBtn = getActionBtn();
+        if (finalBtn && finalBtn.innerText.includes("중지")) {
+            forceClickElement(finalBtn);
+            await sleep(300);
+        }
+
         await randomSleep(400, 600);
         await closeReforgePanel();
     }
 
-    // 💡 [보관함 자동 예치 루틴] 가방 탭 -> 선택 이동 -> 아이템 전체 클릭 -> 보관 버튼 클릭
-    async function visitStorageAndDeposit() {
-        if (hasUrgentPriorityBossInQueue()) return;
+    // 💡 [보관함 자동 예치 루틴]
+    async function visitStorageAndDeposit(token = runToken) {
+        if (token !== runToken || hasUrgentPriorityBossInQueue()) return;
 
         console.log("\n📦 [보관함 방문] 가방에 남은 아이템을 보관하기 위해 모닥 마을 보관함으로 이동합니다.");
-        const inTown = await navigateToMap("모닥 마을");
+        const inTown = await navigateToMap("모닥 마을", token);
         if (!inTown) {
             console.log("  -> [보관함 건너뜀] 모닥 마을 이동 실패");
             return;
         }
-        if (hasUrgentPriorityBossInQueue()) return;
+        if (token !== runToken || hasUrgentPriorityBossInQueue()) return;
 
         const closeStoragePanel = async () => {
             const closeBtn = document.querySelector('section.storage-panel button[aria-label="보관함 닫기"]') ||
@@ -1014,19 +1097,18 @@
             await closeStorageAndWrongPanels();
         };
 
-        await ensureMount();
+        await ensureMount(3, token);
 
         let storagePanel = null;
         for (let attempt = 1; attempt <= 4; attempt++) {
-            if (hasUrgentPriorityBossInQueue()) return;
+            if (token !== runToken || hasUrgentPriorityBossInQueue()) return;
 
             const rx = attempt === 1 ? 1.8 : 1.2;
             const ry = attempt === 1 ? 1.5 : 1.1;
 
-            await glideToTarget(TOWN_STORAGE.x, TOWN_STORAGE.y, rx, ry, 10.0);
+            await glideToTarget(TOWN_STORAGE.x, TOWN_STORAGE.y, rx, ry, 10.0, token);
+            if (token !== runToken || hasUrgentPriorityBossInQueue()) return;
             await sleep(180);
-
-            if (hasUrgentPriorityBossInQueue()) return;
 
             simulateKey('f');
 
@@ -1058,7 +1140,6 @@
             return;
         }
 
-        // 1) '가방' 탭 클릭
         const bagTabBtn = Array.from(storagePanel.querySelectorAll('button.storage-tab-button[role="tab"], button[role="tab"]')).find(
             b => b.innerText.includes("가방")
         );
@@ -1073,12 +1154,11 @@
             return;
         }
 
-        if (hasUrgentPriorityBossInQueue()) {
+        if (token !== runToken || hasUrgentPriorityBossInQueue()) {
             await closeStoragePanel();
             return;
         }
 
-        // 2) '선택 이동' 버튼이 있으면 활성화 클릭
         const selectMoveBtn = Array.from(storagePanel.querySelectorAll('button')).find(
             b => b.innerText.replace(/\s+/g, '').includes("선택이동")
         );
@@ -1087,7 +1167,6 @@
             await randomSleep(350, 550);
         }
 
-        // 3) 가방 그리드 내 보유 아이템 전체 체크
         const itemSlots = Array.from(
             storagePanel.querySelectorAll('.storage-inventory button.inventory-slot.has-item, button.inventory-slot.has-item[role="checkbox"]')
         );
@@ -1100,7 +1179,7 @@
 
         let checkedCount = 0;
         for (const slot of itemSlots) {
-            if (hasUrgentPriorityBossInQueue()) {
+            if (token !== runToken || hasUrgentPriorityBossInQueue()) {
                 await closeStoragePanel();
                 return;
             }
@@ -1113,7 +1192,6 @@
         console.log(`  -> [아이템 선택] 가방 아이템 ${checkedCount}개 선택 완료`);
         await randomSleep(350, 550);
 
-        // 4) 하단 'N개 보관' 버튼 클릭 (storagePanel 내부 및 document 전체에서 탐색)
         let depositBtn = null;
         const depositWaitStart = Date.now();
         while (Date.now() - depositWaitStart < 2500) {
@@ -1149,7 +1227,7 @@
         if (!btn) return false;
         return btn.classList.contains('is-active') || btn.getAttribute('aria-label') === '귀환 취소';
     }
-    async function smartReturnTown() {
+    async function smartReturnTown(token = runToken) {
         if (getCurrentMapName() === "모닥 마을") return true;
         await ensureLootPanelClosed(2000);
         await closeStorageAndWrongPanels();
@@ -1159,6 +1237,7 @@
         await sleep(300);
 
         for (let attempt = 1; attempt <= 10; attempt++) {
+            if (token !== runToken || isHandlingDeath) return false;
             if (getCurrentMapName() === "모닥 마을") return true;
 
             const portalBtn = getTownPortalButton();
@@ -1170,6 +1249,7 @@
 
             while (Date.now() - castStart < 3800) {
                 await sleep(200);
+                if (token !== runToken || isHandlingDeath) return false;
                 if (getCurrentMapName() === "모닥 마을") return true;
                 if (!isTownPortalActive() && Date.now() - castStart > 1200) {
                     isInterrupted = true;
@@ -1188,7 +1268,7 @@
     }
 
     // 💡 [기본 사냥터 복귀 및 인벤토리 정비(판매 -> 강화 -> 보관) 실행]
-    async function moveToSelectedHuntingGround() {
+    async function moveToSelectedHuntingGround(token = runToken) {
         const allGrounds = getAllHuntingGrounds();
         const target = allGrounds.find(g => g.id === selectedHuntingGround) || allGrounds[0];
         console.log(`\n🎯 [복귀 및 정비 체크] 기본 사냥터 대상: '${target.name}' (${target.map})`);
@@ -1196,51 +1276,73 @@
         await setAutoHunting(false);
         await closeStorageAndWrongPanels();
 
+        if (token !== runToken || isHandlingDeath) return;
+
         const forceFullBagRun = isBagFullPending;
         isBagFullPending = false;
 
-        if (isShopSellEnabled || forceFullBagRun) {
-            const slots = forceFullBagRun ? 100 : await checkInventorySlotCount();
-            if (!forceFullBagRun) {
-                console.log(`🎒 [인벤토리 검사] 현재 슬롯 사용량: ${slots}/100 (판매 기준: ${shopSellSlotThreshold}칸 이상)`);
+        const isAnyMaintenanceEnabled = isShopSellEnabled || isAutoEnhanceEnabled || isStorageDepositEnabled;
+        const isPaused = Date.now() < maintenancePauseUntil;
+
+        if ((isAnyMaintenanceEnabled || forceFullBagRun) && !isPaused) {
+            const slots = await checkInventorySlotCount();
+            if (slots !== null) {
+                console.log(`🎒 [인벤토리 검사] 현재 슬롯 사용량: ${slots}/100 (기준: ${shopSellSlotThreshold}칸 이상)`);
             }
 
-            if (forceFullBagRun || slots >= shopSellSlotThreshold) {
+            const shouldRunMaintenance = forceFullBagRun || (slots !== null && slots >= shopSellSlotThreshold);
+
+            if (shouldRunMaintenance) {
+                const beforeSlots = slots ?? 100;
                 console.log(`⚠️ [마을 정비 시작] 상점 판매 ➔ 대장장이 강화 ➔ 보관함 예치 루틴을 진행합니다.`);
 
-                if (isShopSellEnabled) {
-                    await visitShopAndSellItems();
+                if (isShopSellEnabled && token === runToken) {
+                    await visitShopAndSellItems(token);
                 }
 
-                if (isAutoEnhanceEnabled && !hasUrgentPriorityBossInQueue()) {
-                    await visitBlacksmithAndEnhance();
+                if (isAutoEnhanceEnabled && token === runToken && !hasUrgentPriorityBossInQueue()) {
+                    await visitBlacksmithAndEnhance(token);
                 }
 
-                if (isStorageDepositEnabled && !hasUrgentPriorityBossInQueue()) {
-                    await visitStorageAndDeposit();
+                if (isStorageDepositEnabled && token === runToken && !hasUrgentPriorityBossInQueue()) {
+                    await visitStorageAndDeposit(token);
                 }
-            } else {
+
+                if (token === runToken && !hasUrgentPriorityBossInQueue()) {
+                    const afterSlots = await checkInventorySlotCount();
+                    if (afterSlots !== null && afterSlots >= beforeSlots && afterSlots >= shopSellSlotThreshold) {
+                        maintenancePauseUntil = Date.now() + 10 * 60 * 1000;
+                        console.log(`🛑 [정비 일시 유예] 정비 후에도 가방이 비워지지 않아(${afterSlots}/100) 무한 왕복 방지를 위해 10분간 정비를 중지합니다.`);
+                    }
+                }
+            } else if (slots !== null) {
                 console.log("✨ [가방 여유] 마을 방문 없이 최단 경로로 사냥터 직행");
             }
+        } else if (isPaused && forceFullBagRun) {
+            console.log("⏳ [정비 유예 중] 보관함/가방 포화 유예 상태이므로 사냥터로 바로 복귀합니다.");
         }
+
+        if (token !== runToken || isHandlingDeath) return;
 
         if (bossQueue.some(b => !defeatedBosses.has(b.index))) {
             console.log("⚔️ [예약 보스 감지] 대기 중인 보스 사냥으로 즉시 전환합니다.");
             return;
         }
 
-        let mapOk = await navigateToMap(target.map);
+        let mapOk = await navigateToMap(target.map, token);
         if (!mapOk) {
+            if (token !== runToken || isHandlingDeath) return;
             if (bossQueue.some(b => !defeatedBosses.has(b.index))) return;
             console.log("  -> [사냥터 이동 실패] 마을 귀환 후 기본 사냥터 이동을 1회 재시도합니다.");
-            await smartReturnTown();
+            await smartReturnTown(token);
 
+            if (token !== runToken || isHandlingDeath) return;
             if (bossQueue.some(b => !defeatedBosses.has(b.index))) return;
-            mapOk = await navigateToMap(target.map);
+            mapOk = await navigateToMap(target.map, token);
         }
 
-        if (!mapOk) {
-            console.log("  -> [실패] 사냥터 맵 최종 진입 실패");
+        if (!mapOk || token !== runToken || isHandlingDeath) {
+            if (token === runToken) console.log("  -> [실패] 사냥터 맵 최종 진입 실패");
             return;
         }
 
@@ -1249,28 +1351,31 @@
             return;
         }
 
-        await ensureMount();
+        await ensureMount(3, token);
 
         if (target.entryPath) {
             for (const wp of target.entryPath) {
-                if (bossQueue.some(b => !defeatedBosses.has(b.index))) return;
-                await glideToTarget(wp.x, wp.y, 2.8, 2.3, 15);
+                if (token !== runToken || bossQueue.some(b => !defeatedBosses.has(b.index))) return;
+                await glideToTarget(wp.x, wp.y, 2.8, 2.3, 15, token);
             }
         }
 
-        if (bossQueue.some(b => !defeatedBosses.has(b.index))) return;
+        if (token !== runToken || bossQueue.some(b => !defeatedBosses.has(b.index))) return;
 
-        await glideToTarget(target.x, target.y, 3.2, 2.5, 20);
-        await setAutoHunting(true);
-        console.log("--- [기본 사냥터 안착] 자동 사냥 활성화 ---");
+        const arrived = await glideToTarget(target.x, target.y, 3.2, 2.5, 20, token);
+        if (arrived && token === runToken && !isHandlingDeath) {
+            await setAutoHunting(true);
+            console.log("--- [기본 사냥터 안착] 자동 사냥 활성화 ---");
+        }
     }
 
     let isReturning = false;
     async function returnToDefaultHuntingGround() {
         if (isReturning) return;
         isReturning = true;
+        const myToken = ++runToken;
         try {
-            await moveToSelectedHuntingGround();
+            await moveToSelectedHuntingGround(myToken);
         } finally {
             isReturning = false;
             if (!isRunning && !isHandlingDeath && bossQueue.some(b => !defeatedBosses.has(b.index))) {
@@ -1282,7 +1387,9 @@
 
     // 💡 [정기 인벤토리 체크 백그라운드 타이머] (15초마다 유휴 상태 확인 후 실행)
     setInterval(async () => {
-        if (!isShopSellEnabled || shopCheckIntervalMin <= 0) return;
+        const isAnyMaintenanceEnabled = isShopSellEnabled || isAutoEnhanceEnabled || isStorageDepositEnabled;
+        if (!isAnyMaintenanceEnabled || shopCheckIntervalMin <= 0) return;
+        if (Date.now() < maintenancePauseUntil) return;
         if (isRunning || isReturning || isHandlingDeath) return;
         if (bossQueue.some(b => !defeatedBosses.has(b.index))) return;
 
@@ -1314,14 +1421,14 @@
         return cur >= bossHuntStartHour || cur < bossHuntEndHour;
     }
 
-    async function huntBossAndLoot(timeoutSec = 240) {
+    async function huntBossAndLoot(timeoutSec = 240, token = runToken) {
         await setAutoHunting(true);
         const startTime = Date.now();
         let bossDefeatedTime = null;
 
         while (Date.now() - startTime < timeoutSec * 1000) {
             await sleep(500);
-            if (isHandlingDeath || document.querySelector('div.death-overlay')) return "dead";
+            if (token !== runToken || isHandlingDeath || document.querySelector('div.death-overlay')) return "dead";
 
             const lootPanel = document.querySelector('section.loot-panel');
             const closeBtn = document.querySelector('button[aria-label="전리품 닫기"]');
@@ -1357,89 +1464,120 @@
     async function executeBossQueueWorker() {
         if (isRunning || isReturning || isHandlingDeath) return;
         isRunning = true;
+        let myToken = ++runToken;
 
-        await setAutoHunting(false);
-        await closeStorageAndWrongPanels();
+        try {
+            await setAutoHunting(false);
+            await closeStorageAndWrongPanels();
 
-        while (bossQueue.length > 0 || currentBossIndex !== -1) {
-            if (isHandlingDeath) break;
+            while (bossQueue.length > 0 || currentBossIndex !== -1) {
+                if (isHandlingDeath) break;
 
-            let currentTarget = currentBossIndex !== -1
-                ? { index: currentBossIndex, name: BOSS_TARGETS[currentBossIndex]?.name || "보스", retries: 0 }
-                : bossQueue.shift();
+                if (myToken !== runToken) {
+                    myToken = runToken;
+                }
 
-            const bossIndex = currentTarget.index;
-            const targetInfo = BOSS_TARGETS[bossIndex];
-            const retryCount = currentTarget.retries || 0;
+                let currentTarget = currentBossIndex !== -1
+                    ? { index: currentBossIndex, name: BOSS_TARGETS[currentBossIndex]?.name || "보스", retries: 0 }
+                    : bossQueue.shift();
 
-            if (defeatedBosses.has(bossIndex)) {
-                currentBossIndex = -1;
-                continue;
-            }
+                const bossIndex = currentTarget.index;
+                const targetInfo = BOSS_TARGETS[bossIndex];
+                const retryCount = currentTarget.retries || 0;
 
-            currentBossIndex = bossIndex;
-            let interruptedByPriority = false;
-            let navFailed = false;
+                if (defeatedBosses.has(bossIndex)) {
+                    currentBossIndex = -1;
+                    continue;
+                }
 
-            console.log(`\n=== [보스 출동] [${bossIndex}] ${targetInfo.name} ${retryCount > 0 ? `(귀환 재시도 ${retryCount}/2)` : ''} ===`);
+                currentBossIndex = bossIndex;
+                let interruptedByPriority = false;
+                let navFailed = false;
 
-            try {
-                await setAutoHunting(false);
+                console.log(`\n=== [보스 출동] [${bossIndex}] ${targetInfo.name} ${retryCount > 0 ? `(귀환 재시도 ${retryCount}/2)` : ''} ===`);
 
-                const mapOk = await navigateToMap(targetInfo.map);
-                if (mapOk) {
-                    await ensureMount();
-                    if (targetInfo.entryPath) {
-                        for (const wp of targetInfo.entryPath) await glideToTarget(wp.x, wp.y, 2.8, 2.3, 15);
+                try {
+                    await setAutoHunting(false);
+
+                    const mapOk = await navigateToMap(targetInfo.map, myToken, bossIndex);
+                    if (defeatedBosses.has(bossIndex)) {
+                        currentBossIndex = -1;
+                        continue;
                     }
-                    await glideToTarget(targetInfo.x, targetInfo.y, 3.2, 2.5, 20);
 
-                    const res = await huntBossAndLoot(240);
-                    if (res === "urgent_switch") {
+                    if (mapOk) {
+                        await ensureMount(3, myToken);
+                        if (targetInfo.entryPath) {
+                            for (const wp of targetInfo.entryPath) {
+                                await glideToTarget(wp.x, wp.y, 2.8, 2.3, 15, myToken, bossIndex);
+                            }
+                        }
+                        await glideToTarget(targetInfo.x, targetInfo.y, 3.2, 2.5, 20, myToken, bossIndex);
+
+                        if (defeatedBosses.has(bossIndex)) {
+                            currentBossIndex = -1;
+                            continue;
+                        }
+
+                        if (myToken !== runToken && !PRIORITY_BOSSES.has(bossIndex)) {
+                            interruptedByPriority = true;
+                        } else {
+                            const res = await huntBossAndLoot(240, myToken);
+                            if (res === "urgent_switch" || (myToken !== runToken && !PRIORITY_BOSSES.has(bossIndex))) {
+                                interruptedByPriority = true;
+                            }
+                        }
+                    } else if (myToken !== runToken && !PRIORITY_BOSSES.has(bossIndex)) {
                         interruptedByPriority = true;
+                    } else {
+                        navFailed = true;
                     }
-                } else {
+                } catch (e) {
+                    console.log("  -> [출동 오류]", e);
                     navFailed = true;
                 }
-            } catch (e) {
-                console.log("  -> [출동 오류]", e);
-                navFailed = true;
-            }
 
-            if (isHandlingDeath) break;
+                if (isHandlingDeath) break;
 
-            if (navFailed) {
-                if (!defeatedBosses.has(bossIndex) && retryCount < 2) {
-                    console.log(`  -> [출동 실패: 미처치] '${targetInfo.name}' 처치 미확인! 마을 귀환 후 재출동합니다. (${retryCount + 1}/2)`);
-                    await smartReturnTown();
-
+                if (interruptedByPriority) {
                     if (!defeatedBosses.has(bossIndex)) {
-                        const retryTask = { index: bossIndex, name: targetInfo.name, retries: retryCount + 1 };
-                        const firstNonPrio = bossQueue.findIndex(b => !PRIORITY_BOSSES.has(b.index));
-                        if (firstNonPrio === -1) bossQueue.push(retryTask);
-                        else bossQueue.splice(firstNonPrio, 0, retryTask);
+                        const insertPos = bossQueue.findIndex(b => !PRIORITY_BOSSES.has(b.index));
+                        if (insertPos === -1) bossQueue.push(currentTarget);
+                        else bossQueue.splice(insertPos, 0, currentTarget);
                     }
-                } else {
-                    console.log(`  -> [출동 종료] '${targetInfo.name}' 처치 확인 또는 재시도 한도 초과. 다음 일정을 확인합니다.`);
-                    if (bossQueue.some(b => !defeatedBosses.has(b.index))) {
-                        await smartReturnTown();
-                    }
+                    currentBossIndex = -1;
+                    await sleep(200);
+                    continue;
                 }
+
+                if (navFailed) {
+                    if (!defeatedBosses.has(bossIndex) && retryCount < 2) {
+                        console.log(`  -> [출동 실패: 미처치] '${targetInfo.name}' 처치 미확인! 마을 귀환 후 재출동합니다. (${retryCount + 1}/2)`);
+                        await smartReturnTown(myToken);
+
+                        if (!defeatedBosses.has(bossIndex)) {
+                            const retryTask = { index: bossIndex, name: targetInfo.name, retries: retryCount + 1 };
+                            const firstNonPrio = bossQueue.findIndex(b => !PRIORITY_BOSSES.has(b.index));
+                            if (firstNonPrio === -1) bossQueue.push(retryTask);
+                            else bossQueue.splice(firstNonPrio, 0, retryTask);
+                        }
+                    } else {
+                        console.log(`  -> [출동 종료] '${targetInfo.name}' 처치 확인 또는 재시도 한도 초과. 다음 일정을 확인합니다.`);
+                        if (bossQueue.some(b => !defeatedBosses.has(b.index))) {
+                            await smartReturnTown(myToken);
+                        }
+                    }
+                    currentBossIndex = -1;
+                    await sleep(300);
+                    continue;
+                }
+
                 currentBossIndex = -1;
-                await sleep(300);
-                continue;
+                await sleep(400);
             }
-
-            if (interruptedByPriority && !defeatedBosses.has(bossIndex)) {
-                const insertPos = bossQueue.findIndex(b => !PRIORITY_BOSSES.has(b.index));
-                if (insertPos === -1) bossQueue.push(currentTarget);
-                else bossQueue.splice(insertPos, 0, currentTarget);
-            }
-            currentBossIndex = -1;
-            await sleep(400);
+        } finally {
+            isRunning = false;
         }
-
-        isRunning = false;
 
         if (!isHandlingDeath && bossQueue.length === 0) {
             console.log("  -> [전체 보스 루틴 종료] 예약 보스가 없으므로 기본 사냥터 복귀 및 정비 루틴을 시작합니다.");
@@ -1466,6 +1604,7 @@
             else bossQueue.splice(firstNonPriorityIdx, 0, { index: bossIndex, name: bossName, retries: 0 });
 
             if (isRunning && !PRIORITY_BOSSES.has(currentBossIndex)) {
+                runToken++;
                 simulateKey('Escape');
             } else if (!isRunning && !isReturning && !isHandlingDeath) {
                 executeBossQueueWorker();
@@ -1485,6 +1624,7 @@
         if (!deathOverlay) return;
 
         isHandlingDeath = true;
+        runToken++;
         simulateKey('Escape');
         isRunning = false;
 
@@ -1506,7 +1646,8 @@
             }
         }
 
-        await waitForMap("모닥 마을", 15);
+        const myToken = ++runToken;
+        await waitForMap("모닥 마을", 15, myToken);
         await sleep(800);
         await ensureLootPanelClosed(3000);
         await closeStorageAndWrongPanels();
@@ -1578,7 +1719,7 @@
         };
     }
 
-    // 💡 설정 UI
+    // 💡 설정 UI (공통 마을 정비 조건 박스 + 상점/강화/보관함 독립 분리)
     function createSettingsUI() {
         if (document.getElementById('modak-bot-settings-ui')) return;
         const panel = document.createElement('div');
@@ -1648,10 +1789,11 @@
         }).join('');
 
         const isRareChecked = shopSellGrades.includes("레어");
+        const isAnyMaintOn = isShopSellEnabled || isAutoEnhanceEnabled || isStorageDepositEnabled;
 
         panel.innerHTML = `
             <div id="bot-header" style="background:rgba(40,40,40,0.95);padding:10px 12px;border-top-left-radius:7px;border-top-right-radius:7px;font-weight:bold;display:flex;justify-content:space-between;align-items:center;cursor:move;border-bottom:1px solid #444;">
-                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v4.02</span>
+                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v4.04</span>
                 <div>
                     <span id="bot-toggle" style="cursor:pointer;font-size:11px;color:#aaa;padding:2px 4px;">[접기]</span>
                 </div>
@@ -1669,38 +1811,52 @@
                         선택 ⚙️
                     </button>
                 </div>
+
+                <!-- 📦 공통 마을 정비 조건 (상점·강화·보관함 공통 적용) -->
+                <div id="maint-common-box" style="background:rgba(144,202,249,0.06);border:1px solid rgba(144,202,249,0.2);border-radius:5px;padding:6px 8px;margin-bottom:8px;opacity:${isAnyMaintOn ? '1' : '0.45'};">
+                    <div style="font-size:11px;font-weight:bold;color:#90caf9;margin-bottom:5px;">📦 마을 정비 공통 조건</div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+                        <div style="display:flex;align-items:center;gap:4px;">
+                            <span style="font-size:11px;color:#bbb;">기준:</span>
+                            <select id="shop-slot-select" title="정비 시작 가방 칸수 기준" style="padding:2px 4px;background:#333;color:#fff;border:1px solid #555;border-radius:4px;font-size:11px;cursor:pointer;">
+                                ${slotOptionsHTML}
+                            </select>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:4px;">
+                            <span style="font-size:11px;color:#bbb;">주기:</span>
+                            <select id="shop-interval-select" title="일반 사냥 중 주기적 가방 확인 시간" style="padding:2px 5px;background:#333;color:#fff;border:1px solid #555;border-radius:4px;font-size:11px;cursor:pointer;">
+                                ${intervalOptionsHTML}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 🏪 상점 자동 판매 (독립 영역) -->
                 <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:5px;padding:6px 8px;margin-bottom:8px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
                         <span style="font-size:12px;font-weight:bold;">상점 자동 판매:</span>
-                        <div style="display:flex;align-items:center;gap:4px;">
-                            <select id="shop-slot-select" title="가방 슬롯 판매 기준" style="padding:2px 4px;background:#333;color:#fff;border:1px solid #555;border-radius:4px;font-size:11px;cursor:pointer;">
-                                ${slotOptionsHTML}
-                            </select>
-                            <button id="toggle-shop-btn" style="padding:3px 8px;font-size:11px;border-radius:4px;border:none;cursor:pointer;background:${isShopSellEnabled ? '#2e7d32' : '#c62828'};color:#fff;">
-                                ${isShopSellEnabled ? 'ON' : 'OFF'}
-                            </button>
+                        <button id="toggle-shop-btn" style="padding:3px 8px;font-size:11px;border-radius:4px;border:none;cursor:pointer;background:${isShopSellEnabled ? '#2e7d32' : '#c62828'};color:#fff;">
+                            ${isShopSellEnabled ? 'ON' : 'OFF'}
+                        </button>
+                    </div>
+                    <div id="shop-options-area" style="opacity:${isShopSellEnabled ? '1' : '0.45'};">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                            <span style="font-size:11px;color:#aaa;">판매 등급:</span>
+                            <div style="display:flex;align-items:center;gap:8px;">
+                                ${gradeCheckboxesHTML}
+                            </div>
                         </div>
-                    </div>
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
-                        <span style="font-size:11px;color:#aaa;">정기 체크 주기:</span>
-                        <select id="shop-interval-select" title="일반 사냥 중 주기적 가방 확인 시간" style="padding:2px 6px;background:#333;color:#fff;border:1px solid #555;border-radius:4px;font-size:11px;cursor:pointer;">
-                            ${intervalOptionsHTML}
-                        </select>
-                    </div>
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-                        <span style="font-size:11px;color:#aaa;">판매 등급:</span>
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            ${gradeCheckboxesHTML}
+                        <div id="rare-sub-option-row" style="display:flex;justify-content:space-between;align-items:center;padding-top:4px;border-top:1px dashed rgba(255,255,255,0.08);opacity:${isRareChecked ? '1' : '0.45'};">
+                            <span style="font-size:11px;color:#90caf9;">↳ 레어 세부 옵션:</span>
+                            <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#e3f2fd;cursor:${isRareChecked ? 'pointer' : 'not-allowed'};">
+                                <input type="checkbox" id="exclude-gloves-boots-chk" ${isExcludeRareGlovesBoots ? 'checked' : ''} ${isRareChecked ? '' : 'disabled'} style="margin:0;cursor:inherit;">
+                                <span>장갑·장화 제외</span>
+                            </label>
                         </div>
-                    </div>
-                    <div id="rare-sub-option-row" style="display:flex;justify-content:space-between;align-items:center;padding-top:4px;border-top:1px dashed rgba(255,255,255,0.08);opacity:${isRareChecked ? '1' : '0.45'};">
-                        <span style="font-size:11px;color:#90caf9;">↳ 레어 세부 옵션:</span>
-                        <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#e3f2fd;cursor:${isRareChecked ? 'pointer' : 'not-allowed'};">
-                            <input type="checkbox" id="exclude-gloves-boots-chk" ${isExcludeRareGlovesBoots ? 'checked' : ''} ${isRareChecked ? '' : 'disabled'} style="margin:0;cursor:inherit;">
-                            <span>장갑·장화 제외</span>
-                        </label>
                     </div>
                 </div>
+
+                <!-- 🔨 자동 강화 목표 -->
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                     <span style="font-size:12px;font-weight:bold;">자동 강화 목표:</span>
                     <div style="display:flex;align-items:center;gap:4px;">
@@ -1712,12 +1868,15 @@
                         </button>
                     </div>
                 </div>
+
+                <!-- 📥 보관함 자동 보관 -->
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                     <span style="font-size:12px;font-weight:bold;">보관함 자동 보관:</span>
                     <button id="toggle-storage-btn" style="padding:3px 8px;font-size:11px;border-radius:4px;border:none;cursor:pointer;background:${isStorageDepositEnabled ? '#2e7d32' : '#c62828'};color:#fff;">
                         ${isStorageDepositEnabled ? 'ON' : 'OFF'}
                     </button>
                 </div>
+
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
                     <span style="font-size:12px;font-weight:bold;">사냥 시간대:</span>
                     <div style="display:flex;align-items:center;gap:3px;">
@@ -1747,6 +1906,14 @@
             </div>
         `;
         document.body.appendChild(panel);
+
+        const maintCommonBoxEl = panel.querySelector('#maint-common-box');
+        const shopOptionsAreaEl = panel.querySelector('#shop-options-area');
+        const updateMaintBoxOpacity = () => {
+            const anyOn = isShopSellEnabled || isAutoEnhanceEnabled || isStorageDepositEnabled;
+            maintCommonBoxEl.style.opacity = anyOn ? '1' : '0.45';
+            shopOptionsAreaEl.style.opacity = isShopSellEnabled ? '1' : '0.45';
+        };
 
         const groundSelectEl = panel.querySelector('#ground-select');
         const customControlsEl = panel.querySelector('#custom-ground-controls');
@@ -1896,7 +2063,8 @@
         slotSelectEl.onchange = (e) => {
             shopSellSlotThreshold = parseInt(e.target.value, 10);
             localStorage.setItem('modak_shop_slot_threshold', shopSellSlotThreshold);
-            console.log(`[상점 설정] 판매 시작 슬롯 기준 '${shopSellSlotThreshold}칸 이상'으로 변경 완료`);
+            maintenancePauseUntil = 0;
+            console.log(`[정비 설정] 정비 시작 슬롯 기준 '${shopSellSlotThreshold}칸 이상'으로 변경 완료`);
             slotSelectEl.blur();
         };
 
@@ -1906,7 +2074,7 @@
             shopCheckIntervalMin = parseInt(e.target.value, 10);
             localStorage.setItem('modak_shop_check_interval', shopCheckIntervalMin);
             lastInventoryCheckTime = Date.now();
-            console.log(`[상점 설정] 정기 인벤토리 체크 주기 '${shopCheckIntervalMin > 0 ? shopCheckIntervalMin + '분' : '사용안함'}'(으)로 변경 완료`);
+            console.log(`[정비 설정] 정기 인벤토리 체크 주기 '${shopCheckIntervalMin > 0 ? shopCheckIntervalMin + '분' : '사용안함'}'(으)로 변경 완료`);
             intervalSelectEl.blur();
         };
 
@@ -1917,6 +2085,7 @@
             chk.onchange = () => {
                 shopSellGrades = Array.from(panel.querySelectorAll('.sell-grade-chk:checked')).map(el => el.value);
                 localStorage.setItem('modak_shop_sell_grades', JSON.stringify(shopSellGrades));
+                maintenancePauseUntil = 0;
 
                 const rareActive = shopSellGrades.includes("레어");
                 rareSubRowEl.style.opacity = rareActive ? '1' : '0.45';
@@ -1930,14 +2099,17 @@
         excludeChkEl.onchange = (e) => {
             isExcludeRareGlovesBoots = e.target.checked;
             localStorage.setItem('modak_shop_exclude_gloves_boots', isExcludeRareGlovesBoots);
+            maintenancePauseUntil = 0;
             console.log(`[상점 설정] 레어 장갑·장화 제외: ${isExcludeRareGlovesBoots ? 'ON' : 'OFF'}`);
         };
 
         panel.querySelector('#toggle-shop-btn').onclick = (e) => {
             isShopSellEnabled = !isShopSellEnabled;
             localStorage.setItem('modak_shop_sell_enabled', isShopSellEnabled);
+            maintenancePauseUntil = 0;
             e.target.style.background = isShopSellEnabled ? '#2e7d32' : '#c62828';
             e.target.innerText = isShopSellEnabled ? 'ON' : 'OFF';
+            updateMaintBoxOpacity();
         };
         const enhanceSelectEl = panel.querySelector('#enhance-level-select');
         enhanceSelectEl.addEventListener('click', () => window.focus());
@@ -1952,12 +2124,15 @@
             localStorage.setItem('modak_auto_enhance_enabled', isAutoEnhanceEnabled);
             e.target.style.background = isAutoEnhanceEnabled ? '#2e7d32' : '#c62828';
             e.target.innerText = isAutoEnhanceEnabled ? 'ON' : 'OFF';
+            updateMaintBoxOpacity();
         };
         panel.querySelector('#toggle-storage-btn').onclick = (e) => {
             isStorageDepositEnabled = !isStorageDepositEnabled;
             localStorage.setItem('modak_storage_deposit_enabled', isStorageDepositEnabled);
+            maintenancePauseUntil = 0;
             e.target.style.background = isStorageDepositEnabled ? '#2e7d32' : '#c62828';
             e.target.innerText = isStorageDepositEnabled ? 'ON' : 'OFF';
+            updateMaintBoxOpacity();
         };
         panel.querySelector('#start-h').onchange = (e) => {
             bossHuntStartHour = parseInt(e.target.value, 10);
@@ -1999,8 +2174,14 @@
         if (processedMessages.has(id)) return;
         processedMessages.add(id);
 
-        // 1) 시스템 메시지: 가방 가득 참 감지 ("보관 공간이 부족해 아이템을 획득하지 못했습니다.")
+        if (processedMessages.size > 500) {
+            const firstKey = processedMessages.values().next().value;
+            processedMessages.delete(firstKey);
+        }
+
+        // 1) 시스템 메시지: 가방 가득 참 감지
         if (node.classList.contains('is-system') && text.includes("보관 공간이 부족해 아이템을 획득하지 못했습니다")) {
+            if (Date.now() < maintenancePauseUntil) return;
             const now = Date.now();
             if (now - lastBagFullTriggerTime > 60000) {
                 lastBagFullTriggerTime = now;
@@ -2029,7 +2210,7 @@
 
             const isPriority = PRIORITY_BOSSES.has(bIdx);
             if (isPriority || isBossHuntingEnabled) {
-                const reactionDelay = Math.floor(Math.random() * 251) + 900; // 약 1초 (900 ~ 1150ms)
+                const reactionDelay = Math.floor(Math.random() * 251) + 900;
                 setTimeout(() => enqueueBossTask(bIdx, bName), reactionDelay);
             }
         } else if (text.includes("처치되었습니다")) {
@@ -2068,5 +2249,5 @@
     window.testBlacksmith = visitBlacksmithAndEnhance;
     window.testStorage = visitStorageAndDeposit;
 
-    console.log("모닥 온라인 스마트 라우팅 네비게이션 v4.02 로딩 완료!");
+    console.log("모닥 온라인 스마트 라우팅 네비게이션 v4.04 로딩 완료!");
 })();
