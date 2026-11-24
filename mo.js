@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v4.04 (Separated Maintenance UI)
+// @name         모닥 온라인 보스 오토봇 v4.07 (Verified Enhance Target + Stale Worker Guard)
 // @namespace    http://tampermonkey.net/
-// @version      4.04
+// @version      4.07
 // @match        https://modakmmo.com/*
 // @grant        none
 // ==/UserScript==
@@ -159,11 +159,15 @@
     let isBagFullPending = false;
     let maintenancePauseUntil = 0;
 
-    // 💡 비동기 작업 취소 토큰 (사망/긴급 전환 시 증가시켜 이전 루프 즉시 중단)
+    // 💡 비동기 작업 취소 토큰 및 워커 식별자
     let runToken = 0;
+    let activeWorkerId = 0;
 
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     const randomSleep = (minMs, maxMs) => new Promise(r => setTimeout(r, Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs));
+
+    const isAborted = (token, bossIdx = -1) =>
+        token !== runToken || isHandlingDeath || (bossIdx !== -1 && defeatedBosses.has(bossIdx));
 
     // 💡 [표준 키보드 이벤트 발생기] Escape(27) 및 대문자 keyCode 표준화
     function fireKey(type, keyChar) {
@@ -207,11 +211,11 @@
         return mapNameEl.innerText.replace(/\(.*?\)/g, '').trim();
     }
 
-    async function waitForMap(expectedName, timeoutSec = 15, token = runToken) {
+    async function waitForMap(expectedName, timeoutSec = 15, token = runToken, ignoreDeath = false) {
         console.log(`  -> [맵 전환 대기] '${expectedName}' 확인 중 (최대 ${timeoutSec}초)`);
         const startTime = Date.now();
         while (Date.now() - startTime < timeoutSec * 1000) {
-            if (token !== runToken || isHandlingDeath) return false;
+            if (token !== runToken || (!ignoreDeath && isHandlingDeath)) return false;
             const cur = getCurrentMapName();
             if (cur.includes(expectedName)) {
                 await randomSleep(250, 400);
@@ -259,7 +263,7 @@
         return false;
     }
 
-    // 💡 연속 글라이딩 + 관성 예측 조기 브레이크 엔진 (runToken 및 보스 조기 처치 감지 포함)
+    // 💡 연속 글라이딩 + 관성 예측 조기 브레이크 엔진
     async function glideToTarget(targetX, targetY, radiusX = 3.5, radiusY = 2.8, maxTimeoutSec = 20, token = runToken, watchBossIdx = -1) {
         console.log(`🧭 [글라이딩] (${targetX.toFixed(2)}, ${targetY.toFixed(2)}) 이동 시작`);
         const startTime = Date.now();
@@ -388,7 +392,7 @@
         if (isCurrentlyMounted()) return true;
 
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            if (token !== runToken || isHandlingDeath) return false;
+            if (isAborted(token)) return false;
             if (document.querySelector('section.loot-panel')) {
                 await ensureLootPanelClosed(600);
             }
@@ -448,6 +452,7 @@
     }
 
     async function interactWithLocalCampfire(token = runToken) {
+        if (isAborted(token)) return false;
         const curMap = getCurrentMapName();
         const camp = CAMPFIRES[curMap];
         if (!camp) return false;
@@ -458,13 +463,13 @@
         await ensureMount(3, token);
 
         for (let attempt = 1; attempt <= 4; attempt++) {
-            if (token !== runToken || isHandlingDeath) return false;
+            if (isAborted(token)) return false;
 
             const rx = attempt === 1 ? 2.2 : 1.4;
             const ry = attempt === 1 ? 1.8 : 1.2;
 
             await glideToTarget(camp.x, camp.y, rx, ry, 12, token);
-            if (token !== runToken || isHandlingDeath) return false;
+            if (isAborted(token)) return false;
             await sleep(120);
 
             simulateKey('f');
@@ -509,21 +514,19 @@
     }
 
     async function traversePortalStep(step, token = runToken, watchBossIdx = -1) {
-        if (token !== runToken || isHandlingDeath) return false;
-        if (watchBossIdx !== -1 && defeatedBosses.has(watchBossIdx)) return false;
+        if (isAborted(token, watchBossIdx)) return false;
 
         await ensureMount(3, token);
 
         if (step.waypoints) {
             for (const wp of step.waypoints) {
                 const wpOk = await glideToTarget(wp.x, wp.y, 2.5, 2.0, 15, token, watchBossIdx);
-                if (!wpOk) return false;
+                if (!wpOk && isAborted(token, watchBossIdx)) return false;
             }
         }
 
         for (let attempt = 1; attempt <= 8; attempt++) {
-            if (token !== runToken || isHandlingDeath) return false;
-            if (watchBossIdx !== -1 && defeatedBosses.has(watchBossIdx)) return false;
+            if (isAborted(token, watchBossIdx)) return false;
             if (getCurrentMapName().includes(step.to)) return true;
 
             const rx = attempt === 1 ? 1.8 : 1.2;
@@ -531,7 +534,7 @@
 
             await ensureMount(3, token);
             const arrived = await glideToTarget(step.portal.x, step.portal.y, rx, ry, 10, token, watchBossIdx);
-            if (!arrived) return false;
+            if (!arrived && isAborted(token, watchBossIdx)) return false;
             await sleep(60);
 
             if (document.querySelector('section.loot-panel')) {
@@ -542,7 +545,7 @@
 
             const waitStart = Date.now();
             while (Date.now() - waitStart < 1500) {
-                if (token !== runToken || isHandlingDeath) return false;
+                if (isAborted(token, watchBossIdx)) return false;
                 if (getCurrentMapName().includes(step.to)) {
                     await sleep(250);
                     return true;
@@ -558,11 +561,12 @@
 
     // 💡 [스마트 라우팅 엔진 - 포탈 직행(2회 이하) vs 캠프파이어 워프 비용 비교]
     async function navigateToMap(targetMap, token = runToken, watchBossIdx = -1) {
+        if (isAborted(token, watchBossIdx)) return false;
+
         await setAutoHunting(false);
         await closeStorageAndWrongPanels();
 
-        if (token !== runToken || isHandlingDeath) return false;
-        if (watchBossIdx !== -1 && defeatedBosses.has(watchBossIdx)) return false;
+        if (isAborted(token, watchBossIdx)) return false;
 
         let curMap = getCurrentMapName();
         if (curMap === targetMap) return true;
@@ -624,12 +628,12 @@
             curMap = getCurrentMapName();
         } else {
             console.log("  -> 캠프파이어 보유 맵 연결 실패. 비상 마을 귀환(B) 실행");
-            await smartReturnTown(token);
+            const returned = await smartReturnTown(token);
+            if (!returned) return false;
             curMap = getCurrentMapName();
         }
 
-        if (token !== runToken || isHandlingDeath) return false;
-        if (watchBossIdx !== -1 && defeatedBosses.has(watchBossIdx)) return false;
+        if (isAborted(token, watchBossIdx)) return false;
 
         if (bestTargetCamp) {
             if (curMap !== bestTargetCamp) {
@@ -718,13 +722,13 @@
 
         await sleep(250);
 
-        let count = 0;
+        let count = null;
         const gridEl = document.querySelector('.equipment-inventory[aria-label*="가방"]');
         if (gridEl) {
             const match = (gridEl.getAttribute('aria-label') || '').match(/가방\s*(\d+)\s*\/\s*\d+/);
             if (match) count = parseInt(match[1], 10);
         }
-        if (count === 0) {
+        if (count === null) {
             const countSpan = document.querySelector('.inventory-heading-count');
             if (countSpan && countSpan.innerText) {
                 const match = countSpan.innerText.match(/(\d+)\s*\/\s*\d+/);
@@ -775,7 +779,7 @@
             console.log("  -> [상점 건너뜀] 모닥 마을 이동 실패");
             return;
         }
-        if (token !== runToken || hasUrgentPriorityBossInQueue()) return;
+        if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
 
         const closeShopPanel = async () => {
             const closeBtn = document.querySelector('section.shop-panel button[aria-label="상점 닫기"]') ||
@@ -790,13 +794,13 @@
 
         let shopPanel = null;
         for (let attempt = 1; attempt <= 4; attempt++) {
-            if (token !== runToken || hasUrgentPriorityBossInQueue()) return;
+            if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
 
             const rx = attempt === 1 ? 2.2 : 1.3;
             const ry = attempt === 1 ? 1.8 : 1.1;
 
             await glideToTarget(TOWN_SHOP.x, TOWN_SHOP.y, rx, ry, 8.0, token);
-            if (token !== runToken || hasUrgentPriorityBossInQueue()) return;
+            if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
             await sleep(180);
 
             simulateKey('f');
@@ -839,7 +843,7 @@
         let clickedCount = 0;
 
         for (const name of shopSellGrades) {
-            if (token !== runToken || hasUrgentPriorityBossInQueue()) {
+            if (isAborted(token) || hasUrgentPriorityBossInQueue()) {
                 await closeShopPanel();
                 return;
             }
@@ -850,7 +854,7 @@
                 );
                 let excludedCount = 0;
                 for (const slot of rareSlots) {
-                    if (token !== runToken || hasUrgentPriorityBossInQueue()) {
+                    if (isAborted(token) || hasUrgentPriorityBossInQueue()) {
                         await closeShopPanel();
                         return;
                     }
@@ -895,11 +899,17 @@
                 forceClickElement(selectSellBtn);
                 await randomSleep(700, 1000);
 
-                const confirmBtn = document.querySelector('section.shop-panel button.is-danger, [role="dialog"] button.is-danger') ||
-                                   Array.from(document.querySelectorAll('button')).find(b => b.innerText.trim() === "판매하기");
+                const confirmBtn = Array.from(document.querySelectorAll('button')).find(
+                    b => b !== selectSellBtn &&
+                         b.innerText.trim() === "판매하기" &&
+                         !b.disabled &&
+                         !b.hasAttribute('disabled')
+                );
                 if (confirmBtn) {
                     forceClickElement(confirmBtn);
                     await randomSleep(1500, 2000);
+                } else {
+                    console.log("  -> [상점 경고] '판매하기' 최종 확인 버튼을 찾지 못했습니다.");
                 }
             }
         }
@@ -907,9 +917,9 @@
         await closeShopPanel();
     }
 
-    // 💡 모닥 마을 대장장이 +1~+9 선택형 자동 강화 루틴
+    // 💡 모닥 마을 대장장이 +1~+9 선택형 자동 강화 루틴 (목표 수치 반영 검증 포함)
     async function visitBlacksmithAndEnhance(token = runToken) {
-        if (token !== runToken || hasUrgentPriorityBossInQueue()) return;
+        if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
 
         const targetLabel = `+${autoEnhanceTargetLevel}`;
         console.log(`\n🔨 [대장장이 방문] ${targetLabel} 자동 강화를 위해 대장장이로 이동합니다.`);
@@ -918,7 +928,7 @@
             console.log("  -> [대장장이 건너뜀] 모닥 마을 이동 실패");
             return;
         }
-        if (token !== runToken || hasUrgentPriorityBossInQueue()) return;
+        if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
 
         const closeReforgePanel = async () => {
             const closeBtn = document.querySelector('button[aria-label="강화소 닫기"]');
@@ -933,13 +943,13 @@
         let autoTabBtn = null;
 
         for (let attempt = 1; attempt <= 4; attempt++) {
-            if (token !== runToken || hasUrgentPriorityBossInQueue()) return;
+            if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
 
             const rx = attempt === 1 ? 1.8 : 1.2;
             const ry = attempt === 1 ? 1.5 : 1.1;
 
             await glideToTarget(TOWN_BLACKSMITH.x, TOWN_BLACKSMITH.y, rx, ry, 10.0, token);
-            if (token !== runToken || hasUrgentPriorityBossInQueue()) return;
+            if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
             await sleep(180);
 
             simulateKey('f');
@@ -989,18 +999,50 @@
             await randomSleep(400, 600);
         }
 
-        if (token !== runToken || hasUrgentPriorityBossInQueue()) {
+        if (isAborted(token) || hasUrgentPriorityBossInQueue()) {
             await closeReforgePanel();
             return;
         }
 
-        const targetPlusBtn = Array.from(document.querySelectorAll('.reforge-targets button, button[type="button"]')).find(
-            b => b.innerText.replace(/\s+/g, '') === targetLabel
-        );
-        if (targetPlusBtn && targetPlusBtn.getAttribute('aria-pressed') !== 'true') {
+        // 1) .reforge-targets 내부에서 목표 강화 단계(+1~+9) 버튼 탐색 (최대 2초 대기)
+        let targetPlusBtn = null;
+        const plusWaitStart = Date.now();
+        while (Date.now() - plusWaitStart < 2000) {
+            targetPlusBtn = Array.from(document.querySelectorAll('.reforge-targets button')).find(
+                b => (b.innerText || b.textContent || '').replace(/\s+/g, '') === targetLabel
+            );
+            if (targetPlusBtn) break;
+            await sleep(150);
+        }
+
+        if (!targetPlusBtn) {
+            console.log(`  -> [자동 강화 오류] .reforge-targets 내에서 ${targetLabel} 버튼을 찾지 못했습니다.`);
+            await closeReforgePanel();
+            return;
+        }
+
+        // 2) 하단 시작 버튼('자동 강화 시작 · +N') 텍스트 및 속성으로 실제 선택 여부 교차 검증
+        const isTargetLevelApplied = () => {
+            const actionBtn = document.querySelector('button.reforge-action.reforge-primary-action');
+            if (actionBtn && actionBtn.innerText.includes(targetLabel)) return true;
+            return targetPlusBtn.getAttribute('aria-pressed') === 'true' ||
+                   targetPlusBtn.getAttribute('aria-selected') === 'true' ||
+                   targetPlusBtn.classList.contains('is-active');
+        };
+
+        for (let tryClick = 1; tryClick <= 3; tryClick++) {
+            if (isTargetLevelApplied()) break;
+            console.log(`  -> [목표 단계 선택] ${targetLabel} 버튼 클릭 (${tryClick}/3)`);
             forceClickElement(targetPlusBtn);
             await randomSleep(300, 450);
         }
+
+        if (!isTargetLevelApplied()) {
+            console.log(`  -> [자동 강화 중단] ${targetLabel} 단계가 적용되지 않아 안전을 위해 강화를 중단합니다.`);
+            await closeReforgePanel();
+            return;
+        }
+        console.log(`  -> [목표 단계 검증 완료] ${targetLabel} 적용 확인`);
 
         const selectAllBtn = Array.from(document.querySelectorAll('.reforge-selection-controls button')).find(
             b => b.innerText.includes("전체 선택")
@@ -1015,7 +1057,7 @@
         forceClickElement(selectAllBtn);
         await randomSleep(400, 600);
 
-        if (token !== runToken || hasUrgentPriorityBossInQueue()) {
+        if (isAborted(token) || hasUrgentPriorityBossInQueue()) {
             await closeReforgePanel();
             return;
         }
@@ -1048,7 +1090,7 @@
                 sawRunningState = true;
             }
 
-            if (token !== runToken || hasUrgentPriorityBossInQueue()) {
+            if (isAborted(token) || hasUrgentPriorityBossInQueue()) {
                 console.log("🚨 [긴급 탈출] 우선 작업 발생! 자동 강화를 즉시 중지하고 출동합니다.");
                 if (isEnhancing) {
                     forceClickElement(actionBtn);
@@ -1078,7 +1120,7 @@
 
     // 💡 [보관함 자동 예치 루틴]
     async function visitStorageAndDeposit(token = runToken) {
-        if (token !== runToken || hasUrgentPriorityBossInQueue()) return;
+        if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
 
         console.log("\n📦 [보관함 방문] 가방에 남은 아이템을 보관하기 위해 모닥 마을 보관함으로 이동합니다.");
         const inTown = await navigateToMap("모닥 마을", token);
@@ -1086,7 +1128,7 @@
             console.log("  -> [보관함 건너뜀] 모닥 마을 이동 실패");
             return;
         }
-        if (token !== runToken || hasUrgentPriorityBossInQueue()) return;
+        if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
 
         const closeStoragePanel = async () => {
             const closeBtn = document.querySelector('section.storage-panel button[aria-label="보관함 닫기"]') ||
@@ -1101,13 +1143,13 @@
 
         let storagePanel = null;
         for (let attempt = 1; attempt <= 4; attempt++) {
-            if (token !== runToken || hasUrgentPriorityBossInQueue()) return;
+            if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
 
             const rx = attempt === 1 ? 1.8 : 1.2;
             const ry = attempt === 1 ? 1.5 : 1.1;
 
             await glideToTarget(TOWN_STORAGE.x, TOWN_STORAGE.y, rx, ry, 10.0, token);
-            if (token !== runToken || hasUrgentPriorityBossInQueue()) return;
+            if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
             await sleep(180);
 
             simulateKey('f');
@@ -1154,7 +1196,7 @@
             return;
         }
 
-        if (token !== runToken || hasUrgentPriorityBossInQueue()) {
+        if (isAborted(token) || hasUrgentPriorityBossInQueue()) {
             await closeStoragePanel();
             return;
         }
@@ -1179,7 +1221,7 @@
 
         let checkedCount = 0;
         for (const slot of itemSlots) {
-            if (token !== runToken || hasUrgentPriorityBossInQueue()) {
+            if (isAborted(token) || hasUrgentPriorityBossInQueue()) {
                 await closeStoragePanel();
                 return;
             }
@@ -1237,7 +1279,7 @@
         await sleep(300);
 
         for (let attempt = 1; attempt <= 10; attempt++) {
-            if (token !== runToken || isHandlingDeath) return false;
+            if (isAborted(token)) return false;
             if (getCurrentMapName() === "모닥 마을") return true;
 
             const portalBtn = getTownPortalButton();
@@ -1249,7 +1291,7 @@
 
             while (Date.now() - castStart < 3800) {
                 await sleep(200);
-                if (token !== runToken || isHandlingDeath) return false;
+                if (isAborted(token)) return false;
                 if (getCurrentMapName() === "모닥 마을") return true;
                 if (!isTownPortalActive() && Date.now() - castStart > 1200) {
                     isInterrupted = true;
@@ -1276,7 +1318,7 @@
         await setAutoHunting(false);
         await closeStorageAndWrongPanels();
 
-        if (token !== runToken || isHandlingDeath) return;
+        if (isAborted(token)) return;
 
         const forceFullBagRun = isBagFullPending;
         isBagFullPending = false;
@@ -1296,23 +1338,23 @@
                 const beforeSlots = slots ?? 100;
                 console.log(`⚠️ [마을 정비 시작] 상점 판매 ➔ 대장장이 강화 ➔ 보관함 예치 루틴을 진행합니다.`);
 
-                if (isShopSellEnabled && token === runToken) {
+                if (isShopSellEnabled && !isAborted(token)) {
                     await visitShopAndSellItems(token);
                 }
 
-                if (isAutoEnhanceEnabled && token === runToken && !hasUrgentPriorityBossInQueue()) {
+                if (isAutoEnhanceEnabled && !isAborted(token) && !hasUrgentPriorityBossInQueue()) {
                     await visitBlacksmithAndEnhance(token);
                 }
 
-                if (isStorageDepositEnabled && token === runToken && !hasUrgentPriorityBossInQueue()) {
+                if (isStorageDepositEnabled && !isAborted(token) && !hasUrgentPriorityBossInQueue()) {
                     await visitStorageAndDeposit(token);
                 }
 
-                if (token === runToken && !hasUrgentPriorityBossInQueue()) {
+                if (!isAborted(token) && !hasUrgentPriorityBossInQueue()) {
                     const afterSlots = await checkInventorySlotCount();
-                    if (afterSlots !== null && afterSlots >= beforeSlots && afterSlots >= shopSellSlotThreshold) {
+                    if (afterSlots !== null && afterSlots >= shopSellSlotThreshold && (beforeSlots - afterSlots) < 5) {
                         maintenancePauseUntil = Date.now() + 10 * 60 * 1000;
-                        console.log(`🛑 [정비 일시 유예] 정비 후에도 가방이 비워지지 않아(${afterSlots}/100) 무한 왕복 방지를 위해 10분간 정비를 중지합니다.`);
+                        console.log(`🛑 [정비 일시 유예] 정비 후 가방 감소폭이 미미하여(${beforeSlots}칸 ➔ ${afterSlots}칸) 무한 왕복 방지를 위해 10분간 정비를 중지합니다.`);
                     }
                 }
             } else if (slots !== null) {
@@ -1322,7 +1364,7 @@
             console.log("⏳ [정비 유예 중] 보관함/가방 포화 유예 상태이므로 사냥터로 바로 복귀합니다.");
         }
 
-        if (token !== runToken || isHandlingDeath) return;
+        if (isAborted(token)) return;
 
         if (bossQueue.some(b => !defeatedBosses.has(b.index))) {
             console.log("⚔️ [예약 보스 감지] 대기 중인 보스 사냥으로 즉시 전환합니다.");
@@ -1331,18 +1373,18 @@
 
         let mapOk = await navigateToMap(target.map, token);
         if (!mapOk) {
-            if (token !== runToken || isHandlingDeath) return;
+            if (isAborted(token)) return;
             if (bossQueue.some(b => !defeatedBosses.has(b.index))) return;
             console.log("  -> [사냥터 이동 실패] 마을 귀환 후 기본 사냥터 이동을 1회 재시도합니다.");
             await smartReturnTown(token);
 
-            if (token !== runToken || isHandlingDeath) return;
+            if (isAborted(token)) return;
             if (bossQueue.some(b => !defeatedBosses.has(b.index))) return;
             mapOk = await navigateToMap(target.map, token);
         }
 
-        if (!mapOk || token !== runToken || isHandlingDeath) {
-            if (token === runToken) console.log("  -> [실패] 사냥터 맵 최종 진입 실패");
+        if (!mapOk || isAborted(token)) {
+            if (!isAborted(token)) console.log("  -> [실패] 사냥터 맵 최종 진입 실패");
             return;
         }
 
@@ -1355,15 +1397,15 @@
 
         if (target.entryPath) {
             for (const wp of target.entryPath) {
-                if (token !== runToken || bossQueue.some(b => !defeatedBosses.has(b.index))) return;
+                if (isAborted(token) || bossQueue.some(b => !defeatedBosses.has(b.index))) return;
                 await glideToTarget(wp.x, wp.y, 2.8, 2.3, 15, token);
             }
         }
 
-        if (token !== runToken || bossQueue.some(b => !defeatedBosses.has(b.index))) return;
+        if (isAborted(token) || bossQueue.some(b => !defeatedBosses.has(b.index))) return;
 
-        const arrived = await glideToTarget(target.x, target.y, 3.2, 2.5, 20, token);
-        if (arrived && token === runToken && !isHandlingDeath) {
+        await glideToTarget(target.x, target.y, 3.2, 2.5, 20, token);
+        if (!isAborted(token) && !bossQueue.some(b => !defeatedBosses.has(b.index))) {
             await setAutoHunting(true);
             console.log("--- [기본 사냥터 안착] 자동 사냥 활성화 ---");
         }
@@ -1440,8 +1482,9 @@
                 return true;
             }
 
-            if (bossQueue.length > 0 && PRIORITY_BOSSES.has(bossQueue[0].index) && !PRIORITY_BOSSES.has(currentBossIndex)) {
-                console.log(`  -> [긴급 탈출] 최우선 보스(${bossQueue[0].name}) 출현으로 현재 보스 취소`);
+            if (!PRIORITY_BOSSES.has(currentBossIndex) &&
+                bossQueue.some(b => PRIORITY_BOSSES.has(b.index) && !defeatedBosses.has(b.index))) {
+                console.log("  -> [긴급 탈출] 최우선 보스 출현으로 현재 보스 취소");
                 await ensureLootPanelClosed(2000);
                 await setAutoHunting(false);
                 return "urgent_switch";
@@ -1464,14 +1507,17 @@
     async function executeBossQueueWorker() {
         if (isRunning || isReturning || isHandlingDeath) return;
         isRunning = true;
+        const myWorkerId = ++activeWorkerId;
         let myToken = ++runToken;
+
+        const isStaleWorker = () => isHandlingDeath || myWorkerId !== activeWorkerId;
 
         try {
             await setAutoHunting(false);
             await closeStorageAndWrongPanels();
 
             while (bossQueue.length > 0 || currentBossIndex !== -1) {
-                if (isHandlingDeath) break;
+                if (isStaleWorker()) break;
 
                 if (myToken !== runToken) {
                     myToken = runToken;
@@ -1486,7 +1532,7 @@
                 const retryCount = currentTarget.retries || 0;
 
                 if (defeatedBosses.has(bossIndex)) {
-                    currentBossIndex = -1;
+                    if (!isStaleWorker()) currentBossIndex = -1;
                     continue;
                 }
 
@@ -1498,8 +1544,11 @@
 
                 try {
                     await setAutoHunting(false);
+                    if (isStaleWorker()) break;
 
                     const mapOk = await navigateToMap(targetInfo.map, myToken, bossIndex);
+                    if (isStaleWorker()) break;
+
                     if (defeatedBosses.has(bossIndex)) {
                         currentBossIndex = -1;
                         continue;
@@ -1507,12 +1556,18 @@
 
                     if (mapOk) {
                         await ensureMount(3, myToken);
+                        if (isStaleWorker()) break;
+
                         if (targetInfo.entryPath) {
                             for (const wp of targetInfo.entryPath) {
                                 await glideToTarget(wp.x, wp.y, 2.8, 2.3, 15, myToken, bossIndex);
+                                if (isStaleWorker()) break;
                             }
                         }
+                        if (isStaleWorker()) break;
+
                         await glideToTarget(targetInfo.x, targetInfo.y, 3.2, 2.5, 20, myToken, bossIndex);
+                        if (isStaleWorker()) break;
 
                         if (defeatedBosses.has(bossIndex)) {
                             currentBossIndex = -1;
@@ -1523,6 +1578,7 @@
                             interruptedByPriority = true;
                         } else {
                             const res = await huntBossAndLoot(240, myToken);
+                            if (isStaleWorker()) break;
                             if (res === "urgent_switch" || (myToken !== runToken && !PRIORITY_BOSSES.has(bossIndex))) {
                                 interruptedByPriority = true;
                             }
@@ -1537,7 +1593,7 @@
                     navFailed = true;
                 }
 
-                if (isHandlingDeath) break;
+                if (isStaleWorker()) break;
 
                 if (interruptedByPriority) {
                     if (!defeatedBosses.has(bossIndex)) {
@@ -1554,6 +1610,7 @@
                     if (!defeatedBosses.has(bossIndex) && retryCount < 2) {
                         console.log(`  -> [출동 실패: 미처치] '${targetInfo.name}' 처치 미확인! 마을 귀환 후 재출동합니다. (${retryCount + 1}/2)`);
                         await smartReturnTown(myToken);
+                        if (isStaleWorker()) break;
 
                         if (!defeatedBosses.has(bossIndex)) {
                             const retryTask = { index: bossIndex, name: targetInfo.name, retries: retryCount + 1 };
@@ -1565,6 +1622,7 @@
                         console.log(`  -> [출동 종료] '${targetInfo.name}' 처치 확인 또는 재시도 한도 초과. 다음 일정을 확인합니다.`);
                         if (bossQueue.some(b => !defeatedBosses.has(b.index))) {
                             await smartReturnTown(myToken);
+                            if (isStaleWorker()) break;
                         }
                     }
                     currentBossIndex = -1;
@@ -1576,13 +1634,15 @@
                 await sleep(400);
             }
         } finally {
-            isRunning = false;
+            if (myWorkerId === activeWorkerId) {
+                isRunning = false;
+            }
         }
 
-        if (!isHandlingDeath && bossQueue.length === 0) {
+        if (myWorkerId === activeWorkerId && !isHandlingDeath && bossQueue.length === 0) {
             console.log("  -> [전체 보스 루틴 종료] 예약 보스가 없으므로 기본 사냥터 복귀 및 정비 루틴을 시작합니다.");
             await returnToDefaultHuntingGround();
-        } else if (!isHandlingDeath && bossQueue.some(b => !defeatedBosses.has(b.index))) {
+        } else if (myWorkerId === activeWorkerId && !isHandlingDeath && bossQueue.some(b => !defeatedBosses.has(b.index))) {
             executeBossQueueWorker();
         }
     }
@@ -1605,8 +1665,9 @@
 
             if (isRunning && !PRIORITY_BOSSES.has(currentBossIndex)) {
                 runToken++;
-                simulateKey('Escape');
-            } else if (!isRunning && !isReturning && !isHandlingDeath) {
+            } else if (isReturning) {
+                runToken++;
+            } else if (!isRunning && !isHandlingDeath) {
                 executeBossQueueWorker();
             }
             return;
@@ -1625,6 +1686,7 @@
 
         isHandlingDeath = true;
         runToken++;
+        activeWorkerId++;
         simulateKey('Escape');
         isRunning = false;
 
@@ -1647,7 +1709,11 @@
         }
 
         const myToken = ++runToken;
-        await waitForMap("모닥 마을", 15, myToken);
+        const arrivedTown = await waitForMap("모닥 마을", 15, myToken, true);
+        if (!arrivedTown) {
+            await smartReturnTown(myToken);
+        }
+
         await sleep(800);
         await ensureLootPanelClosed(3000);
         await closeStorageAndWrongPanels();
@@ -1719,7 +1785,7 @@
         };
     }
 
-    // 💡 설정 UI (공통 마을 정비 조건 박스 + 상점/강화/보관함 독립 분리)
+    // 💡 설정 UI
     function createSettingsUI() {
         if (document.getElementById('modak-bot-settings-ui')) return;
         const panel = document.createElement('div');
@@ -1793,7 +1859,7 @@
 
         panel.innerHTML = `
             <div id="bot-header" style="background:rgba(40,40,40,0.95);padding:10px 12px;border-top-left-radius:7px;border-top-right-radius:7px;font-weight:bold;display:flex;justify-content:space-between;align-items:center;cursor:move;border-bottom:1px solid #444;">
-                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v4.04</span>
+                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v4.07</span>
                 <div>
                     <span id="bot-toggle" style="cursor:pointer;font-size:11px;color:#aaa;padding:2px 4px;">[접기]</span>
                 </div>
@@ -1812,7 +1878,7 @@
                     </button>
                 </div>
 
-                <!-- 📦 공통 마을 정비 조건 (상점·강화·보관함 공통 적용) -->
+                <!-- 📦 공통 마을 정비 조건 -->
                 <div id="maint-common-box" style="background:rgba(144,202,249,0.06);border:1px solid rgba(144,202,249,0.2);border-radius:5px;padding:6px 8px;margin-bottom:8px;opacity:${isAnyMaintOn ? '1' : '0.45'};">
                     <div style="font-size:11px;font-weight:bold;color:#90caf9;margin-bottom:5px;">📦 마을 정비 공통 조건</div>
                     <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
@@ -1831,7 +1897,7 @@
                     </div>
                 </div>
 
-                <!-- 🏪 상점 자동 판매 (독립 영역) -->
+                <!-- 🏪 상점 자동 판매 -->
                 <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:5px;padding:6px 8px;margin-bottom:8px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
                         <span style="font-size:12px;font-weight:bold;">상점 자동 판매:</span>
@@ -2249,5 +2315,5 @@
     window.testBlacksmith = visitBlacksmithAndEnhance;
     window.testStorage = visitStorageAndDeposit;
 
-    console.log("모닥 온라인 스마트 라우팅 네비게이션 v4.04 로딩 완료!");
+    console.log("모닥 온라인 스마트 라우팅 네비게이션 v4.07 로딩 완료!");
 })();
