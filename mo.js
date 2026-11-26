@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v4.07 (Verified Enhance Target + Stale Worker Guard)
+// @name         모닥 온라인 보스 오토봇 v4.08 (Auto Expand Minimap + Verified Enhance)
 // @namespace    http://tampermonkey.net/
-// @version      4.07
+// @version      4.08
 // @match        https://modakmmo.com/*
 // @grant        none
 // ==/UserScript==
@@ -192,7 +192,35 @@
         setTimeout(() => fireKey('keyup', keyChar), duration);
     }
 
+    function forceClickElement(el) {
+        if (!el) return;
+        try {
+            if (window.focus) window.focus();
+            el.focus?.();
+            const opts = { bubbles: true, cancelable: true, view: window };
+            el.dispatchEvent(new PointerEvent('pointerdown', opts));
+            el.dispatchEvent(new MouseEvent('mousedown', opts));
+            el.dispatchEvent(new PointerEvent('pointerup', opts));
+            el.dispatchEvent(new MouseEvent('mouseup', opts));
+            el.click();
+        } catch (e) {
+            el.click();
+        }
+    }
+
+    let lastMinimapExpandClick = 0;
     function getCoords() {
+        // 미니맵이 접혀 있으면(aria-expanded="false") 자동으로 클릭하여 펼침
+        const minimapBtn = document.getElementById('hud-minimap-row');
+        if (minimapBtn && minimapBtn.getAttribute('aria-expanded') === 'false') {
+            if (Date.now() - lastMinimapExpandClick > 800) {
+                lastMinimapExpandClick = Date.now();
+                console.log("🗺️ [미니맵 자동 펼침] 미니맵이 접혀 있어 자동으로 엽니다.");
+                forceClickElement(minimapBtn);
+            }
+            return null;
+        }
+
         const svg = document.querySelector('svg.hud-minimap-image');
         if (!svg) return null;
         const viewBox = svg.getAttribute('viewBox');
@@ -224,22 +252,6 @@
             await sleep(150);
         }
         return false;
-    }
-
-    function forceClickElement(el) {
-        if (!el) return;
-        try {
-            if (window.focus) window.focus();
-            el.focus?.();
-            const opts = { bubbles: true, cancelable: true, view: window };
-            el.dispatchEvent(new PointerEvent('pointerdown', opts));
-            el.dispatchEvent(new MouseEvent('mousedown', opts));
-            el.dispatchEvent(new PointerEvent('pointerup', opts));
-            el.dispatchEvent(new MouseEvent('mouseup', opts));
-            el.click();
-        } catch (e) {
-            el.click();
-        }
     }
 
     async function closeStorageAndWrongPanels() {
@@ -1859,7 +1871,7 @@
 
         panel.innerHTML = `
             <div id="bot-header" style="background:rgba(40,40,40,0.95);padding:10px 12px;border-top-left-radius:7px;border-top-right-radius:7px;font-weight:bold;display:flex;justify-content:space-between;align-items:center;cursor:move;border-bottom:1px solid #444;">
-                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v4.07</span>
+                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v4.08</span>
                 <div>
                     <span id="bot-toggle" style="cursor:pointer;font-size:11px;color:#aaa;padding:2px 4px;">[접기]</span>
                 </div>
@@ -2315,5 +2327,5 @@
     window.testBlacksmith = visitBlacksmithAndEnhance;
     window.testStorage = visitStorageAndDeposit;
 
-    console.log("모닥 온라인 스마트 라우팅 네비게이션 v4.07 로딩 완료!");
+    console.log("모닥 온라인 스마트 라우팅 네비게이션 v4.08 로딩 완료!");
 })();
