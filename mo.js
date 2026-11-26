@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v4.10 (Test Stop & Boss Move Helpers)
+// @name         모닥 온라인 보스 오토봇 v4.11 (Custom Boss Priority UI + Plain Map)
 // @namespace    http://tampermonkey.net/
-// @version      4.10
+// @version      4.11
 // @match        https://modakmmo.com/*
 // @grant        none
 // ==/UserScript==
@@ -40,8 +40,24 @@
         12: { map: "해적의 본거지", x: 488.66, y: 667.95, name: "선장 큐알" }
     };
 
-    // 💡 [최우선 긴급 출동 보스 목록] (1: 망국의 마장기, 10: 숲길의 두 사슴)
-    const PRIORITY_BOSSES = new Set([1, 10]);
+    // 💡 [기본 보스 우선순위 초기값] (저장값이 없을 때만 적용, 이후 UI에서 자유롭게 변경 가능)
+    const DEFAULT_TIER1_BOSSES = new Set([1, 10]);
+    const DEFAULT_TIER2_BOSSES = new Set([11, 12]);
+
+    function getBossTier(bossIndex) {
+        const idx = Number(bossIndex);
+        const saved = localStorage.getItem(`modak_boss_tier_${idx}`);
+        if (saved === '1' || saved === '2' || saved === '3') {
+            return parseInt(saved, 10);
+        }
+        if (DEFAULT_TIER1_BOSSES.has(idx)) return 1;
+        if (DEFAULT_TIER2_BOSSES.has(idx)) return 2;
+        return 3;
+    }
+
+    function setBossTier(bossIndex, tier) {
+        localStorage.setItem(`modak_boss_tier_${Number(bossIndex)}`, String(tier));
+    }
 
     // 💡 [기본 내장 사냥터 실측 위치]
     const DEFAULT_HUNTING_GROUNDS = [
@@ -781,8 +797,9 @@
         return count;
     }
 
-    function hasUrgentPriorityBossInQueue() {
-        return bossQueue.some(b => PRIORITY_BOSSES.has(b.index) && !defeatedBosses.has(b.index));
+    // 💡 정비 루틴 중 즉시 복귀해야 할 상위 우선순위(1·2순위) 보스가 대기열에 있는지 확인
+    function hasHighPriorityBossInQueue() {
+        return bossQueue.some(b => getBossTier(b.index) <= 2 && !defeatedBosses.has(b.index));
     }
 
     // 💡 모닥 마을 상점 판매 루틴
@@ -803,7 +820,7 @@
             console.log("  -> [상점 건너뜀] 모닥 마을 이동 실패");
             return;
         }
-        if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
+        if (isAborted(token) || hasHighPriorityBossInQueue()) return;
 
         const closeShopPanel = async () => {
             const closeBtn = document.querySelector('section.shop-panel button[aria-label="상점 닫기"]') ||
@@ -818,13 +835,13 @@
 
         let shopPanel = null;
         for (let attempt = 1; attempt <= 4; attempt++) {
-            if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
+            if (isAborted(token) || hasHighPriorityBossInQueue()) return;
 
             const rx = attempt === 1 ? 2.2 : 1.3;
             const ry = attempt === 1 ? 1.8 : 1.1;
 
             await glideToTarget(TOWN_SHOP.x, TOWN_SHOP.y, rx, ry, 8.0, token);
-            if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
+            if (isAborted(token) || hasHighPriorityBossInQueue()) return;
             await sleep(180);
 
             simulateKey('f');
@@ -867,7 +884,7 @@
         let clickedCount = 0;
 
         for (const name of shopSellGrades) {
-            if (isAborted(token) || hasUrgentPriorityBossInQueue()) {
+            if (isAborted(token) || hasHighPriorityBossInQueue()) {
                 await closeShopPanel();
                 return;
             }
@@ -878,7 +895,7 @@
                 );
                 let excludedCount = 0;
                 for (const slot of rareSlots) {
-                    if (isAborted(token) || hasUrgentPriorityBossInQueue()) {
+                    if (isAborted(token) || hasHighPriorityBossInQueue()) {
                         await closeShopPanel();
                         return;
                     }
@@ -943,7 +960,7 @@
 
     // 💡 모닥 마을 대장장이 +1~+9 선택형 자동 강화 루틴
     async function visitBlacksmithAndEnhance(token = runToken) {
-        if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
+        if (isAborted(token) || hasHighPriorityBossInQueue()) return;
 
         const targetLabel = `+${autoEnhanceTargetLevel}`;
         console.log(`\n🔨 [대장장이 방문] ${targetLabel} 자동 강화를 위해 대장장이로 이동합니다.`);
@@ -952,7 +969,7 @@
             console.log("  -> [대장장이 건너뜀] 모닥 마을 이동 실패");
             return;
         }
-        if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
+        if (isAborted(token) || hasHighPriorityBossInQueue()) return;
 
         const closeReforgePanel = async () => {
             const closeBtn = document.querySelector('button[aria-label="강화소 닫기"]');
@@ -967,13 +984,13 @@
         let autoTabBtn = null;
 
         for (let attempt = 1; attempt <= 4; attempt++) {
-            if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
+            if (isAborted(token) || hasHighPriorityBossInQueue()) return;
 
             const rx = attempt === 1 ? 1.8 : 1.2;
             const ry = attempt === 1 ? 1.5 : 1.1;
 
             await glideToTarget(TOWN_BLACKSMITH.x, TOWN_BLACKSMITH.y, rx, ry, 10.0, token);
-            if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
+            if (isAborted(token) || hasHighPriorityBossInQueue()) return;
             await sleep(180);
 
             simulateKey('f');
@@ -1023,7 +1040,7 @@
             await randomSleep(400, 600);
         }
 
-        if (isAborted(token) || hasUrgentPriorityBossInQueue()) {
+        if (isAborted(token) || hasHighPriorityBossInQueue()) {
             await closeReforgePanel();
             return;
         }
@@ -1079,7 +1096,7 @@
         forceClickElement(selectAllBtn);
         await randomSleep(400, 600);
 
-        if (isAborted(token) || hasUrgentPriorityBossInQueue()) {
+        if (isAborted(token) || hasHighPriorityBossInQueue()) {
             await closeReforgePanel();
             return;
         }
@@ -1112,7 +1129,7 @@
                 sawRunningState = true;
             }
 
-            if (isAborted(token) || hasUrgentPriorityBossInQueue()) {
+            if (isAborted(token) || hasHighPriorityBossInQueue()) {
                 console.log("🚨 [긴급 탈출] 우선 작업 발생! 자동 강화를 즉시 중지하고 출동합니다.");
                 if (isEnhancing) {
                     forceClickElement(actionBtn);
@@ -1142,7 +1159,7 @@
 
     // 💡 [보관함 자동 예치 루틴]
     async function visitStorageAndDeposit(token = runToken) {
-        if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
+        if (isAborted(token) || hasHighPriorityBossInQueue()) return;
 
         console.log("\n📦 [보관함 방문] 가방에 남은 아이템을 보관하기 위해 모닥 마을 보관함으로 이동합니다.");
         const inTown = await navigateToMap("모닥 마을", token);
@@ -1150,7 +1167,7 @@
             console.log("  -> [보관함 건너뜀] 모닥 마을 이동 실패");
             return;
         }
-        if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
+        if (isAborted(token) || hasHighPriorityBossInQueue()) return;
 
         const closeStoragePanel = async () => {
             const closeBtn = document.querySelector('section.storage-panel button[aria-label="보관함 닫기"]') ||
@@ -1165,13 +1182,13 @@
 
         let storagePanel = null;
         for (let attempt = 1; attempt <= 4; attempt++) {
-            if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
+            if (isAborted(token) || hasHighPriorityBossInQueue()) return;
 
             const rx = attempt === 1 ? 1.8 : 1.2;
             const ry = attempt === 1 ? 1.5 : 1.1;
 
             await glideToTarget(TOWN_STORAGE.x, TOWN_STORAGE.y, rx, ry, 10.0, token);
-            if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
+            if (isAborted(token) || hasHighPriorityBossInQueue()) return;
             await sleep(180);
 
             simulateKey('f');
@@ -1218,7 +1235,7 @@
             return;
         }
 
-        if (isAborted(token) || hasUrgentPriorityBossInQueue()) {
+        if (isAborted(token) || hasHighPriorityBossInQueue()) {
             await closeStoragePanel();
             return;
         }
@@ -1243,7 +1260,7 @@
 
         let checkedCount = 0;
         for (const slot of itemSlots) {
-            if (isAborted(token) || hasUrgentPriorityBossInQueue()) {
+            if (isAborted(token) || hasHighPriorityBossInQueue()) {
                 await closeStoragePanel();
                 return;
             }
@@ -1364,15 +1381,15 @@
                     await visitShopAndSellItems(token);
                 }
 
-                if (isAutoEnhanceEnabled && !isAborted(token) && !hasUrgentPriorityBossInQueue()) {
+                if (isAutoEnhanceEnabled && !isAborted(token) && !hasHighPriorityBossInQueue()) {
                     await visitBlacksmithAndEnhance(token);
                 }
 
-                if (isStorageDepositEnabled && !isAborted(token) && !hasUrgentPriorityBossInQueue()) {
+                if (isStorageDepositEnabled && !isAborted(token) && !hasHighPriorityBossInQueue()) {
                     await visitStorageAndDeposit(token);
                 }
 
-                if (!isAborted(token) && !hasUrgentPriorityBossInQueue()) {
+                if (!isAborted(token) && !hasHighPriorityBossInQueue()) {
                     const afterSlots = await checkInventorySlotCount();
                     if (afterSlots !== null && afterSlots >= shopSellSlotThreshold && (beforeSlots - afterSlots) < 5) {
                         maintenancePauseUntil = Date.now() + 10 * 60 * 1000;
@@ -1504,9 +1521,11 @@
                 return true;
             }
 
-            if (!PRIORITY_BOSSES.has(currentBossIndex) &&
-                bossQueue.some(b => PRIORITY_BOSSES.has(b.index) && !defeatedBosses.has(b.index))) {
-                console.log("  -> [긴급 탈출] 최우선 보스 출현으로 현재 보스 취소");
+            // 현재 사냥 중인 보스보다 상위 우선순위(tier 숫자가 작음) 보스가 큐에 들어오면 긴급 탈출
+            const curTier = getBossTier(currentBossIndex);
+            if (curTier > 1 &&
+                bossQueue.some(b => getBossTier(b.index) < curTier && !defeatedBosses.has(b.index))) {
+                console.log(`  -> [긴급 탈출] 상위 우선순위 보스 출현으로 현재 보스(${curTier}순위) 취소`);
                 await ensureLootPanelClosed(2000);
                 await setAutoHunting(false);
                 return "urgent_switch";
@@ -1550,6 +1569,7 @@
                     : bossQueue.shift();
 
                 const bossIndex = currentTarget.index;
+                const bossTier = getBossTier(bossIndex);
                 const targetInfo = BOSS_TARGETS[bossIndex];
                 const retryCount = currentTarget.retries || 0;
 
@@ -1559,10 +1579,10 @@
                 }
 
                 currentBossIndex = bossIndex;
-                let interruptedByPriority = false;
+                let interruptedByHigherTier = false;
                 let navFailed = false;
 
-                console.log(`\n=== [보스 출동] [${bossIndex}] ${targetInfo.name} ${retryCount > 0 ? `(귀환 재시도 ${retryCount}/2)` : ''} ===`);
+                console.log(`\n=== [보스 출동] [${bossIndex}] ${targetInfo.name} (${bossTier}순위) ${retryCount > 0 ? `(귀환 재시도 ${retryCount}/2)` : ''} ===`);
 
                 try {
                     await setAutoHunting(false);
@@ -1596,17 +1616,18 @@
                             continue;
                         }
 
-                        if (myToken !== runToken && !PRIORITY_BOSSES.has(bossIndex)) {
-                            interruptedByPriority = true;
+                        const hasHigherInQueue = bossQueue.some(b => getBossTier(b.index) < bossTier && !defeatedBosses.has(b.index));
+                        if (myToken !== runToken && hasHigherInQueue) {
+                            interruptedByHigherTier = true;
                         } else {
                             const res = await huntBossAndLoot(240, myToken);
                             if (isStaleWorker()) break;
-                            if (res === "urgent_switch" || (myToken !== runToken && !PRIORITY_BOSSES.has(bossIndex))) {
-                                interruptedByPriority = true;
+                            if (res === "urgent_switch" || (myToken !== runToken && bossQueue.some(b => getBossTier(b.index) < bossTier && !defeatedBosses.has(b.index)))) {
+                                interruptedByHigherTier = true;
                             }
                         }
-                    } else if (myToken !== runToken && !PRIORITY_BOSSES.has(bossIndex)) {
-                        interruptedByPriority = true;
+                    } else if (myToken !== runToken && bossQueue.some(b => getBossTier(b.index) < bossTier && !defeatedBosses.has(b.index))) {
+                        interruptedByHigherTier = true;
                     } else {
                         navFailed = true;
                     }
@@ -1617,9 +1638,10 @@
 
                 if (isStaleWorker()) break;
 
-                if (interruptedByPriority) {
+                if (interruptedByHigherTier) {
                     if (!defeatedBosses.has(bossIndex)) {
-                        const insertPos = bossQueue.findIndex(b => !PRIORITY_BOSSES.has(b.index));
+                        // 자기보다 낮은 순위(tier > bossTier) 보스 바로 앞에 복귀 대기열 삽입
+                        const insertPos = bossQueue.findIndex(b => getBossTier(b.index) > bossTier);
                         if (insertPos === -1) bossQueue.push(currentTarget);
                         else bossQueue.splice(insertPos, 0, currentTarget);
                     }
@@ -1636,9 +1658,9 @@
 
                         if (!defeatedBosses.has(bossIndex)) {
                             const retryTask = { index: bossIndex, name: targetInfo.name, retries: retryCount + 1 };
-                            const firstNonPrio = bossQueue.findIndex(b => !PRIORITY_BOSSES.has(b.index));
-                            if (firstNonPrio === -1) bossQueue.push(retryTask);
-                            else bossQueue.splice(firstNonPrio, 0, retryTask);
+                            const insertPos = bossQueue.findIndex(b => getBossTier(b.index) > bossTier);
+                            if (insertPos === -1) bossQueue.push(retryTask);
+                            else bossQueue.splice(insertPos, 0, retryTask);
                         }
                     } else {
                         console.log(`  -> [출동 종료] '${targetInfo.name}' 처치 확인 또는 재시도 한도 초과. 다음 일정을 확인합니다.`);
@@ -1671,34 +1693,36 @@
 
     function enqueueBossTask(bossIndex, bossName) {
         if (!getBossEnabledStatus(bossIndex)) return;
-        const isPriority = PRIORITY_BOSSES.has(bossIndex);
+        const tier = getBossTier(bossIndex);
 
-        if (!isBossHuntingEnabled && !isPriority) return;
-        if (!isPriority && !isCurrentTimeInBossRange()) return;
+        // 1순위(최우선)만 보스 OFF 및 사냥 시간대 제한 무시 (2·3순위는 설정 준수)
+        if (tier > 1) {
+            if (!isBossHuntingEnabled) return;
+            if (!isCurrentTimeInBossRange()) return;
+        }
         if (defeatedBosses.has(bossIndex)) return;
+        if (currentBossIndex === bossIndex) return;
 
-        if (isPriority) {
-            const idx = bossQueue.findIndex(b => b.index === bossIndex);
-            if (idx !== -1) bossQueue.splice(idx, 1);
-
-            const firstNonPriorityIdx = bossQueue.findIndex(b => !PRIORITY_BOSSES.has(b.index));
-            if (firstNonPriorityIdx === -1) bossQueue.push({ index: bossIndex, name: bossName, retries: 0 });
-            else bossQueue.splice(firstNonPriorityIdx, 0, { index: bossIndex, name: bossName, retries: 0 });
-
-            if (isRunning && !PRIORITY_BOSSES.has(currentBossIndex)) {
-                runToken++;
-            } else if (isReturning) {
-                runToken++;
-            } else if (!isRunning && !isHandlingDeath) {
-                executeBossQueueWorker();
-            }
-            return;
+        // 중복 제거 후 자기 Tier 구간의 맨 뒤에 삽입 (1순위 -> 2순위 -> 3순위 순서 유지)
+        const existingIdx = bossQueue.findIndex(b => b.index === bossIndex);
+        if (existingIdx !== -1) {
+            if (tier === 3) return;
+            bossQueue.splice(existingIdx, 1);
         }
 
-        if (!bossQueue.some(b => b.index === bossIndex) && currentBossIndex !== bossIndex) {
-            bossQueue.push({ index: bossIndex, name: bossName, retries: 0 });
+        const insertIdx = bossQueue.findIndex(b => getBossTier(b.index) > tier);
+        const task = { index: bossIndex, name: bossName, retries: 0 };
+        if (insertIdx === -1) bossQueue.push(task);
+        else bossQueue.splice(insertIdx, 0, task);
+
+        // 현재 실행 중인 보스보다 높은 우선순위(tier가 작음)라면 즉시 인터럽트
+        if (isRunning && currentBossIndex !== -1 && tier < getBossTier(currentBossIndex)) {
+            runToken++;
+        } else if (isReturning && tier <= 2) {
+            runToken++;
+        } else if (!isRunning && !isHandlingDeath) {
+            executeBossQueueWorker();
         }
-        if (!isRunning && !isReturning && !isHandlingDeath) executeBossQueueWorker();
     }
 
     async function checkAndHandleDeath() {
@@ -1752,33 +1776,51 @@
         }
     }
 
-    // 💡 설정 모달 UI
+    // 💡 보스 목록 및 우선순위 설정 모달 UI
     function openBossFilterModal() {
         let modal = document.getElementById('modak-boss-modal');
-        if (modal) { modal.style.display = 'flex'; return; }
+        if (modal) {
+            // 모달을 다시 열 때 최신 저장된 우선순위 값으로 동기화
+            modal.querySelectorAll('.boss-tier-select').forEach(sel => {
+                sel.value = String(getBossTier(sel.dataset.idx));
+            });
+            modal.style.display = 'flex';
+            return;
+        }
 
         modal = document.createElement('div');
         modal.id = 'modak-boss-modal';
         modal.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.6);z-index:100000;display:flex;align-items:center;justify-content:center;font-family:sans-serif;user-select:none;';
 
         const listHTML = Object.entries(BOSS_TARGETS).map(([idx, b]) => {
-            const isPrio = PRIORITY_BOSSES.has(Number(idx));
-            const badge = isPrio ? '<span style="color:#ffca28;font-size:11px;margin-left:6px;">[최우선]</span>' : '';
+            const tier = getBossTier(idx);
+            const tierColor = tier === 1 ? '#ffca28' : (tier === 2 ? '#4fc3f7' : '#ccc');
             return `
-                <label style="display:flex;align-items:center;padding:6px 8px;margin-bottom:4px;background:rgba(255,255,255,0.05);border-radius:4px;cursor:pointer;font-size:13px;">
-                    <input type="checkbox" class="boss-chk" data-idx="${idx}" ${getBossEnabledStatus(idx) ? 'checked' : ''} style="margin-right:10px;cursor:pointer;width:15px;height:15px;">
-                    <span style="color:#eee;">[${idx}] ${b.name}${badge}</span>
-                </label>
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;margin-bottom:4px;background:rgba(255,255,255,0.05);border-radius:4px;font-size:13px;">
+                    <label style="display:flex;align-items:center;cursor:pointer;flex:1;min-width:0;margin-right:8px;">
+                        <input type="checkbox" class="boss-chk" data-idx="${idx}" ${getBossEnabledStatus(idx) ? 'checked' : ''} style="margin-right:8px;cursor:pointer;width:15px;height:15px;flex-shrink:0;">
+                        <span style="color:#eee;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">[${idx}] ${b.name}</span>
+                    </label>
+                    <select class="boss-tier-select" data-idx="${idx}" style="padding:2px 4px;background:#2b2b2b;color:${tierColor};border:1px solid #555;border-radius:4px;font-size:11px;cursor:pointer;flex-shrink:0;">
+                        <option value="1" ${tier === 1 ? 'selected' : ''} style="color:#ffca28;">1순위 (최우선)</option>
+                        <option value="2" ${tier === 2 ? 'selected' : ''} style="color:#4fc3f7;">2순위 (차순위)</option>
+                        <option value="3" ${tier === 3 ? 'selected' : ''} style="color:#ccc;">3순위 (일반)</option>
+                    </select>
+                </div>
             `;
         }).join('');
 
         modal.innerHTML = `
-            <div style="background:#202020;border:1px solid rgba(255,255,255,0.2);border-radius:8px;width:320px;box-shadow:0 8px 25px rgba(0,0,0,0.8);overflow:hidden;">
+            <div style="background:#202020;border:1px solid rgba(255,255,255,0.2);border-radius:8px;width:360px;box-shadow:0 8px 25px rgba(0,0,0,0.8);overflow:hidden;">
                 <div style="background:#2b2b2b;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #444;">
-                    <span style="font-weight:bold;color:#fff;font-size:13px;">🎯 보스별 사냥 여부 선택</span>
+                    <span style="font-weight:bold;color:#fff;font-size:13px;">🎯 보스별 사냥 여부 및 우선순위 설정</span>
                     <button id="boss-modal-x" style="background:none;border:none;color:#aaa;cursor:pointer;font-size:16px;">✕</button>
                 </div>
-                <div style="padding:12px 14px;max-height:380px;overflow-y:auto;">
+                <div style="padding:12px 14px;max-height:420px;overflow-y:auto;">
+                    <div style="font-size:11px;color:#aaa;margin-bottom:8px;line-height:1.4;">
+                        • <span style="color:#ffca28;">1순위</span>: 시간대·OFF 무시 출동 / 2·3순위 전투 중단<br>
+                        • <span style="color:#4fc3f7;">2순위</span>: 1순위 다음 출동 / 3순위 전투 중단
+                    </div>
                     <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
                         <button id="boss-all-on" style="background:#333;color:#88f;border:1px solid #555;padding:3px 8px;border-radius:4px;font-size:11px;cursor:pointer;">전체 선택</button>
                         <button id="boss-all-off" style="background:#333;color:#f88;border:1px solid #555;padding:3px 8px;border-radius:4px;font-size:11px;cursor:pointer;">전체 해제</button>
@@ -1798,6 +1840,16 @@
 
         modal.querySelectorAll('.boss-chk').forEach(c => {
             c.onchange = (e) => setBossEnabledStatus(e.target.dataset.idx, e.target.checked);
+        });
+        modal.querySelectorAll('.boss-tier-select').forEach(sel => {
+            sel.onchange = (e) => {
+                const idx = e.target.dataset.idx;
+                const newTier = parseInt(e.target.value, 10);
+                setBossTier(idx, newTier);
+                e.target.style.color = newTier === 1 ? '#ffca28' : (newTier === 2 ? '#4fc3f7' : '#ccc');
+                console.log(`[우선순위 변경] [${idx}] ${BOSS_TARGETS[idx]?.name} ➔ ${newTier}순위`);
+                sel.blur();
+            };
         });
         modal.querySelector('#boss-all-on').onclick = () => {
             modal.querySelectorAll('.boss-chk').forEach(c => { c.checked = true; setBossEnabledStatus(c.dataset.idx, true); });
@@ -1881,7 +1933,7 @@
 
         panel.innerHTML = `
             <div id="bot-header" style="background:rgba(40,40,40,0.95);padding:10px 12px;border-top-left-radius:7px;border-top-right-radius:7px;font-weight:bold;display:flex;justify-content:space-between;align-items:center;cursor:move;border-bottom:1px solid #444;">
-                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v4.10</span>
+                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v4.11</span>
                 <div>
                     <span id="bot-toggle" style="cursor:pointer;font-size:11px;color:#aaa;padding:2px 4px;">[접기]</span>
                 </div>
@@ -1894,7 +1946,7 @@
                     </button>
                 </div>
                 <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-                    <span style="font-size:12px;font-weight:bold;">보스 목록 필터:</span>
+                    <span style="font-size:12px;font-weight:bold;">보스 목록·우선순위:</span>
                     <button id="open-filter-btn" style="padding:3px 8px;font-size:11px;border-radius:4px;border:1px solid #555;cursor:pointer;background:#3b4252;color:#fff;">
                         선택 ⚙️
                     </button>
@@ -2296,8 +2348,8 @@
             defeatedBosses.delete(bIdx);
             if (!getBossEnabledStatus(bIdx)) return;
 
-            const isPriority = PRIORITY_BOSSES.has(bIdx);
-            if (isPriority || isBossHuntingEnabled) {
+            const tier = getBossTier(bIdx);
+            if (tier === 1 || isBossHuntingEnabled) {
                 const reactionDelay = Math.floor(Math.random() * 251) + 900;
                 setTimeout(() => enqueueBossTask(bIdx, bName), reactionDelay);
             }
@@ -2375,8 +2427,9 @@
     window.testBossTask = enqueueBossTask;
     window.testMoveHuntingGround = returnToDefaultHuntingGround;
     window.testCheckBag = checkInventorySlotCount;
+    window.testShop = visitShopAndSellItems;
     window.testBlacksmith = visitBlacksmithAndEnhance;
     window.testStorage = visitStorageAndDeposit;
 
-    console.log("모닥 온라인 스마트 라우팅 네비게이션 v4.10 로딩 완료!");
+    console.log("모닥 온라인 스마트 라우팅 네비게이션 v4.11 로딩 완료!");
 })();
