@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v4.08 (Auto Expand Minimap + Verified Enhance)
+// @name         모닥 온라인 보스 오토봇 v4.10 (Test Stop & Boss Move Helpers)
 // @namespace    http://tampermonkey.net/
-// @version      4.08
+// @version      4.10
 // @match        https://modakmmo.com/*
 // @grant        none
 // ==/UserScript==
@@ -15,7 +15,8 @@
         "망자의 묘지": { x: 508.00, y: 280.75, wpIndex: 1 },
         "잊혀진 고성 중앙부": { x: 756.00, y: 107.25, wpIndex: 2 },
         "뼈바람 협곡": { x: 33.00, y: 432.67, wpIndex: 3 },
-        "붉은숲 피난처": { x: -4.50, y: 605.75, wpIndex: 4 }
+        "붉은숲 피난처": { x: -4.50, y: 605.75, wpIndex: 4 },
+        "난파선 해변": { x: 757.52, y: 681.09, wpIndex: 5 }
     };
 
     const TOWN_SHOP = { x: 32.53, y: 181.21 };
@@ -28,13 +29,15 @@
         1: { map: "망국의 병기창", entryPath: [{ x: 829.33, y: 167.58 }], x: 894.08, y: 179.42, name: "망국의 마장기" },
         2: { map: "잊혀진 고성 입구", x: 631.97, y: 122.18, name: "망령 공성대장" },
         3: { map: "망자의 묘지", x: 507.54, y: 193.27, name: "공허의 해골마도사" },
-        4: { map: "초원", x: 271.29, y: 258.51, name: "고대 점액군주" },
+        4: { map: "평원", x: 271.29, y: 258.51, name: "고대 점액군주" },
         5: { map: "황야", x: 382.67, y: 335.82, name: "태양가시 거수" },
         6: { map: "그늘숲", x: -2.06, y: 324.96, name: "스컬 워로드" },
         7: { map: "협곡 진입로", x: -28.04, y: 400.46, name: "뼈바람 포식자" },
         8: { map: "수호자의 안식처", x: 45.31, y: 557.36, name: "뒤틀린 태초목" },
         9: { map: "붉은숲 피난처", x: -70.86, y: 618.30, name: "붉은송곳니 우두머리" },
-        10: { map: "고요한 숲길", x: 127.50, y: 682.48, name: "숲길의 두 사슴" }
+        10: { map: "고요한 숲길", x: 127.50, y: 682.48, name: "숲길의 두 사슴" },
+        11: { map: "암초섬", x: 556.76, y: 740.12, name: "파도파괴자" },
+        12: { map: "해적의 본거지", x: 488.66, y: 667.95, name: "선장 큐알" }
     };
 
     // 💡 [최우선 긴급 출동 보스 목록] (1: 망국의 마장기, 10: 숲길의 두 사슴)
@@ -76,15 +79,15 @@
     // 💡 [월드맵 맵 간 연결 그래프 데이터]
     const MAP_EDGES = {
         "모닥 마을": [
-            { to: "초원", portal: { x: 125.43, y: 222.57 } }
+            { to: "평원", portal: { x: 125.43, y: 222.57 } }
         ],
-        "초원": [
+        "평원": [
             { to: "모닥 마을", portal: { x: 142.80, y: 235.07 } },
             { to: "그늘숲", portal: { x: 112.44, y: 273.75 } },
             { to: "황야", portal: { x: 247.12, y: 288.89 } }
         ],
         "황야": [
-            { to: "초원", portal: { x: 278.65, y: 294.80 } },
+            { to: "평원", portal: { x: 278.65, y: 294.80 } },
             { to: "망자의 묘지", portal: { x: 435.56, y: 269.04 } }
         ],
         "망자의 묘지": [
@@ -114,7 +117,7 @@
             { to: "그늘숲", portal: { x: 4.23, y: 363.77 } }
         ],
         "그늘숲": [
-            { to: "초원", portal: { x: 95.92, y: 287.17 } },
+            { to: "평원", portal: { x: 95.92, y: 287.17 } },
             { to: "협곡 진입로", portal: { x: 13.01, y: 355.61 } }
         ],
         "붉은숲 피난처": [
@@ -126,6 +129,16 @@
         ],
         "고요한 숲길": [
             { to: "붉은숲 피난처", portal: { x: 51.72, y: 670.36 } }
+        ],
+        "난파선 해변": [
+            { to: "암초섬", portal: { x: 659.52, y: 696.55 } }
+        ],
+        "암초섬": [
+            { to: "난파선 해변", portal: { x: 644.50, y: 704.99 } },
+            { to: "해적의 본거지", portal: { x: 537.29, y: 718.80 } }
+        ],
+        "해적의 본거지": [
+            { to: "암초섬", portal: { x: 525.79, y: 713.87 } }
         ]
     };
 
@@ -210,7 +223,6 @@
 
     let lastMinimapExpandClick = 0;
     function getCoords() {
-        // 미니맵이 접혀 있으면(aria-expanded="false") 자동으로 클릭하여 펼침
         const minimapBtn = document.getElementById('hud-minimap-row');
         if (minimapBtn && minimapBtn.getAttribute('aria-expanded') === 'false') {
             if (Date.now() - lastMinimapExpandClick > 800) {
@@ -929,7 +941,7 @@
         await closeShopPanel();
     }
 
-    // 💡 모닥 마을 대장장이 +1~+9 선택형 자동 강화 루틴 (목표 수치 반영 검증 포함)
+    // 💡 모닥 마을 대장장이 +1~+9 선택형 자동 강화 루틴
     async function visitBlacksmithAndEnhance(token = runToken) {
         if (isAborted(token) || hasUrgentPriorityBossInQueue()) return;
 
@@ -1016,7 +1028,6 @@
             return;
         }
 
-        // 1) .reforge-targets 내부에서 목표 강화 단계(+1~+9) 버튼 탐색 (최대 2초 대기)
         let targetPlusBtn = null;
         const plusWaitStart = Date.now();
         while (Date.now() - plusWaitStart < 2000) {
@@ -1033,7 +1044,6 @@
             return;
         }
 
-        // 2) 하단 시작 버튼('자동 강화 시작 · +N') 텍스트 및 속성으로 실제 선택 여부 교차 검증
         const isTargetLevelApplied = () => {
             const actionBtn = document.querySelector('button.reforge-action.reforge-primary-action');
             if (actionBtn && actionBtn.innerText.includes(targetLabel)) return true;
@@ -1871,7 +1881,7 @@
 
         panel.innerHTML = `
             <div id="bot-header" style="background:rgba(40,40,40,0.95);padding:10px 12px;border-top-left-radius:7px;border-top-right-radius:7px;font-weight:bold;display:flex;justify-content:space-between;align-items:center;cursor:move;border-bottom:1px solid #444;">
-                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v4.08</span>
+                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v4.10</span>
                 <div>
                     <span id="bot-toggle" style="cursor:pointer;font-size:11px;color:#aaa;padding:2px 4px;">[접기]</span>
                 </div>
@@ -2318,6 +2328,47 @@
     window.addEventListener('load', createSettingsUI);
     if (document.readyState === 'complete' || document.readyState === 'interactive') createSettingsUI();
 
+    // 💡 [테스트 전용 강제 중단 및 이동 검증 헬퍼]
+    window.testStop = async () => {
+        console.log("🛑 [테스트 강제 중단] 모든 이동/보스 대기 및 대기열을 즉시 초기화합니다.");
+        runToken++;
+        activeWorkerId++;
+        bossQueue.length = 0;
+        currentBossIndex = -1;
+        isRunning = false;
+        isReturning = false;
+        await setAutoHunting(false);
+    };
+
+    window.testBossMove = async (bossIndex) => {
+        const targetInfo = BOSS_TARGETS[bossIndex];
+        if (!targetInfo) {
+            console.log(`❌ 존재하지 않는 보스 번호입니다: ${bossIndex}`);
+            return;
+        }
+        await window.testStop();
+        const myToken = ++runToken;
+        console.log(`🧪 [보스 이동 전용 테스트] [${bossIndex}] ${targetInfo.name} (${targetInfo.map}) 이동 시작...`);
+
+        const mapOk = await navigateToMap(targetInfo.map, myToken, -1);
+        if (!mapOk || myToken !== runToken) {
+            console.log(`❌ [테스트 실패/중단] 맵 이동 실패 (${targetInfo.map})`);
+            return false;
+        }
+
+        await ensureMount(3, myToken);
+        if (targetInfo.entryPath) {
+            for (const wp of targetInfo.entryPath) {
+                await glideToTarget(wp.x, wp.y, 2.8, 2.3, 15, myToken, -1);
+                if (myToken !== runToken) return false;
+            }
+        }
+
+        const arrived = await glideToTarget(targetInfo.x, targetInfo.y, 3.2, 2.5, 20, myToken, -1);
+        console.log(`${arrived ? '✅ [이동 테스트 성공]' : '⚠️ [이동 타임아웃]'} [${bossIndex}] ${targetInfo.name} 도착 완료 (전투 대기 생략)`);
+        return arrived;
+    };
+
     window.testCoords = getCoords;
     window.testGlide = glideToTarget;
     window.testNavigate = navigateToMap;
@@ -2327,5 +2378,5 @@
     window.testBlacksmith = visitBlacksmithAndEnhance;
     window.testStorage = visitStorageAndDeposit;
 
-    console.log("모닥 온라인 스마트 라우팅 네비게이션 v4.08 로딩 완료!");
+    console.log("모닥 온라인 스마트 라우팅 네비게이션 v4.10 로딩 완료!");
 })();
