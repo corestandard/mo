@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v4.13 (Shop Rarity Checkbox UI Support)
+// @name         모닥 온라인 보스 오토봇 v4.14 (Prefer Castle Center Campfire)
 // @namespace    http://tampermonkey.net/
-// @version      4.13
+// @version      4.14
 // @match        https://modakmmo.com/*
 // @grant        none
 // ==/UserScript==
@@ -26,7 +26,7 @@
     // 💡 [실측 기반 보스 전투 위치]
     const BOSS_TARGETS = {
         0: { map: "망국의 기록보관소", x: 637.19, y: 59.93, name: "악몽의 집합체" },
-        1: { map: "망국의 병기창", entryPath: [{ x: 829.33, y: 167.58 }], x: 894.08, y: 179.42, name: "망국의 마장기" },
+        1: { map: "망국의 병기창", entryPath: [{ x: 829.33, y: 167.58 }], x: 894.08, y: 179.42, name: "망국의 마도병기" },
         2: { map: "잊혀진 고성 입구", x: 631.97, y: 122.18, name: "망령 공성대장" },
         3: { map: "망자의 묘지", x: 507.54, y: 193.27, name: "공허의 해골마도사" },
         4: { map: "평원", x: 271.29, y: 258.51, name: "고대 점액군주" },
@@ -150,7 +150,7 @@
             { to: "암초섬", portal: { x: 659.52, y: 696.55 } }
         ],
         "암초섬": [
-            { to: "난파선 해변", portal: { x: 644.50, y: 704.99 }, waypoints: [{ x: 556.76, y: 740.12 }] },
+            { to: "난파선 해변", portal: { x: 644.50, y: 704.99 } },
             { to: "해적의 본거지", portal: { x: 537.99, y: 718.98 }, waypoints: [{ x: 556.76, y: 740.12 }] }
         ],
         "해적의 본거지": [
@@ -615,13 +615,23 @@
 
         const walkPath = findPathBetweenMaps(curMap, targetMap);
 
+        // 동일 포탈 수일 때 '잊혀진 고성 중앙부'를 '망자의 묘지'보다 우선 선택
+        const campOrder = [
+            "모닥 마을",
+            "잊혀진 고성 중앙부",
+            "망자의 묘지",
+            "뼈바람 협곡",
+            "붉은숲 피난처",
+            "난파선 해변"
+        ];
+
         let bestStartCamp = null;
         let pathToStartCamp = null;
         if (CAMPFIRES[curMap]) {
             bestStartCamp = curMap;
             pathToStartCamp = [];
         } else {
-            for (const campMap of Object.keys(CAMPFIRES)) {
+            for (const campMap of campOrder) {
                 const p = findPathBetweenMaps(curMap, campMap);
                 if (p && (!pathToStartCamp || p.length < pathToStartCamp.length)) {
                     pathToStartCamp = p;
@@ -636,7 +646,7 @@
             bestTargetCamp = targetMap;
             pathFromTargetCamp = [];
         } else {
-            for (const campMap of Object.keys(CAMPFIRES)) {
+            for (const campMap of campOrder) {
                 const p = findPathBetweenMaps(campMap, targetMap);
                 if (p && (!pathFromTargetCamp || p.length < pathFromTargetCamp.length)) {
                     pathFromTargetCamp = p;
@@ -912,7 +922,6 @@
                 }
                 console.log(`  -> [레어 필터링] 일반 레어 선택 완료 (장갑·장화 ${excludedCount}개 제외)`);
             } else {
-                // 신규 등급 선택 체크박스(.shop-rarity-select label.shop-selection-toggle) 대응
                 const rarityLabels = Array.from(
                     document.querySelectorAll('.shop-rarity-select label.shop-selection-toggle, section.shop-panel label.shop-selection-toggle')
                 );
@@ -934,7 +943,6 @@
                         await randomSleep(250, 400);
                     }
                 } else {
-                    // 구버전 버튼 폴백
                     const currentShopButtons = Array.from(document.querySelectorAll('section.shop-panel button[type="button"]'));
                     const btn = currentShopButtons.find(b => b.innerText.trim() === name);
                     if (btn && !btn.disabled && !btn.hasAttribute('disabled')) {
@@ -1545,7 +1553,6 @@
                 return true;
             }
 
-            // 현재 사냥 중인 보스보다 상위 우선순위(tier 숫자가 작음) 보스가 큐에 들어오면 긴급 탈출
             const curTier = getBossTier(currentBossIndex);
             if (curTier > 1 &&
                 bossQueue.some(b => getBossTier(b.index) < curTier && !defeatedBosses.has(b.index))) {
@@ -1952,7 +1959,7 @@
 
         panel.innerHTML = `
             <div id="bot-header" style="background:rgba(40,40,40,0.95);padding:10px 12px;border-top-left-radius:7px;border-top-right-radius:7px;font-weight:bold;display:flex;justify-content:space-between;align-items:center;cursor:move;border-bottom:1px solid #444;">
-                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v4.13</span>
+                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v4.14</span>
                 <div>
                     <span id="bot-toggle" style="cursor:pointer;font-size:11px;color:#aaa;padding:2px 4px;">[접기]</span>
                 </div>
@@ -2450,5 +2457,5 @@
     window.testBlacksmith = visitBlacksmithAndEnhance;
     window.testStorage = visitStorageAndDeposit;
 
-    console.log("모닥 온라인 스마트 라우팅 네비게이션 v4.13 로딩 완료!");
+    console.log("모닥 온라인 스마트 라우팅 네비게이션 v4.14 로딩 완료!");
 })();
