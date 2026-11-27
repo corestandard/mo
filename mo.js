@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         모닥 온라인 보스 오토봇 v4.14 (Prefer Castle Center Campfire)
+// @name         모닥 온라인 보스 오토봇 v4.16 (Act 3 Y-90 Calibration + Full Features)
 // @namespace    http://tampermonkey.net/
-// @version      4.14
+// @version      4.16
 // @match        https://modakmmo.com/*
 // @grant        none
 // ==/UserScript==
@@ -16,7 +16,7 @@
         "잊혀진 고성 중앙부": { x: 756.00, y: 107.25, wpIndex: 2 },
         "뼈바람 협곡": { x: 33.00, y: 432.67, wpIndex: 3 },
         "붉은숲 피난처": { x: -4.50, y: 605.75, wpIndex: 4 },
-        "난파선 해변": { x: 757.52, y: 681.09, wpIndex: 5 }
+        "난파선 해변": { x: 757.52, y: 591.09, wpIndex: 5 }
     };
 
     const TOWN_SHOP = { x: 32.53, y: 181.21 };
@@ -36,8 +36,8 @@
         8: { map: "수호자의 안식처", x: 45.31, y: 557.36, name: "뒤틀린 태초목" },
         9: { map: "붉은숲 피난처", x: -70.86, y: 618.30, name: "붉은송곳니 우두머리" },
         10: { map: "고요한 숲길", x: 127.50, y: 682.48, name: "숲길의 두 사슴" },
-        11: { map: "암초섬", x: 556.76, y: 740.12, name: "파도파괴자" },
-        12: { map: "해적의 본거지", x: 488.66, y: 667.95, name: "선장 큐알" }
+        11: { map: "암초섬", x: 560.44, y: 648.94, name: "파도파괴자" },
+        12: { map: "해적의 본거지", x: 488.66, y: 577.95, name: "선장 큐알" }
     };
 
     // 💡 [기본 보스 우선순위 초기값] (저장값이 없을 때만 적용, 이후 UI에서 자유롭게 변경 가능)
@@ -147,14 +147,14 @@
             { to: "붉은숲 피난처", portal: { x: 51.72, y: 670.36 } }
         ],
         "난파선 해변": [
-            { to: "암초섬", portal: { x: 659.52, y: 696.55 } }
+            { to: "암초섬", portal: { x: 659.52, y: 606.55 } }
         ],
         "암초섬": [
-            { to: "난파선 해변", portal: { x: 646.31, y: 701.95 } },
-            { to: "해적의 본거지", portal: { x: 537.99, y: 718.98 }, waypoints: [{ x: 556.76, y: 740.12 }] }
+            { to: "난파선 해변", portal: { x: 646.31, y: 611.95 } },
+            { to: "해적의 본거지", portal: { x: 537.99, y: 628.98 }, waypoints: [{ x: 560.44, y: 648.94 }] }
         ],
         "해적의 본거지": [
-            { to: "암초섬", portal: { x: 525.79, y: 713.87 } }
+            { to: "암초섬", portal: { x: 525.79, y: 623.87 } }
         ]
     };
 
@@ -1959,7 +1959,7 @@
 
         panel.innerHTML = `
             <div id="bot-header" style="background:rgba(40,40,40,0.95);padding:10px 12px;border-top-left-radius:7px;border-top-right-radius:7px;font-weight:bold;display:flex;justify-content:space-between;align-items:center;cursor:move;border-bottom:1px solid #444;">
-                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v4.14</span>
+                <span style="pointer-events:none;">🛠️ 스마트 라우팅 v4.16</span>
                 <div>
                     <span id="bot-toggle" style="cursor:pointer;font-size:11px;color:#aaa;padding:2px 4px;">[접기]</span>
                 </div>
@@ -2457,5 +2457,5 @@
     window.testBlacksmith = visitBlacksmithAndEnhance;
     window.testStorage = visitStorageAndDeposit;
 
-    console.log("모닥 온라인 스마트 라우팅 네비게이션 v4.14 로딩 완료!");
+    console.log("모닥 온라인 스마트 라우팅 네비게이션 v4.16 로딩 완료!");
 })();
